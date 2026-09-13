@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.11] - 2026-09-13
+
+### Fixed — Channel `filters:` vs ESPHome sensor.register_sensor Collision
+
+#### CRIT: Codegen Crash on Channels with pool_station `filters:`
+- **Error**: `AttributeError: 'EStr' object has no attribute 'items'` in `sensor.setup_sensor_core_` → `build_filters()`
+- **Root cause**: v0.7.9+ calls `sensor.register_sensor(ch_var, ch_conf)` so ESPHome 2026.x can set entity metadata. Channel YAML already uses `filters:` for pool_station guards (`filter_samples`, `max_jump`, `max_jump_streak`, `value_min`, `value_max`). ESPHome treats `CONF_FILTERS` as the standard sensor-filter registry and iterates that dict as a list of filter configs
+- **YAML unchanged**: existing `filters: filter_samples/max_jump/...` semantics are preserved
+- **Fix**:
+  - Before `register_sensor`, pass a shallow copy of the channel config with colliding keys stripped (`filters`)
+  - Apply channel guards via the existing `set_filter_*` path on the original config
+  - Scan of other channel keys vs `setup_sensor_core_` / `setup_entity`: only `filters` collides
+- register_sensor entity-metadata approach from v0.7.9/v0.7.10 preserved
+
+---
+
 ## [0.7.10] - 2026-09-13
 
 ### Fixed — "string value is None" Validation Error for pH/ORP Channels
@@ -677,7 +693,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.10** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.11** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

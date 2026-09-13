@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.10 (Lot 7 — Fix device_class=None validation error)  
+> Version: 0.7.11 (Lot 7 — Fix filters: vs sensor.register_sensor collision)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 

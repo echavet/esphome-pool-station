@@ -25,6 +25,7 @@ from esphome.const import (
     CONF_ACCURACY_DECIMALS,
 )
 from esphome.core import coroutine
+from .sensor_register_compat import sensor_register_config
 
 CODEOWNERS = ["@echavet"]
 MULTI_CONF = False
@@ -389,6 +390,10 @@ def filters_schema():
     - max_jump: Maximum allowed change between readings (0 = disabled)
     - max_jump_streak: Accept new plateau after N consecutive similar values
     - value_min/value_max: Clamp calibrated values to range
+    
+    YAML key is `filters:` (same string as ESPHome CONF_FILTERS). Codegen
+    must strip this key before sensor.register_sensor() — see
+    sensor_register_compat.sensor_register_config().
     """
     return cv.Schema({
         cv.Optional(CONF_FILTER_SAMPLES, default=0): cv.int_range(min=0, max=20),
@@ -1401,8 +1406,10 @@ async def to_code(config):
             await cg.register_component(ch_var, ch_conf)
             # Register sensor with ESPHome's standard helper which configures
             # all entity metadata (name, unit, icon, state_class, device_class)
-            # via the proper codegen calls that ESPHome 2026.x expects
-            await sensor.register_sensor(ch_var, ch_conf)
+            # via the proper codegen calls that ESPHome 2026.x expects.
+            # Strip pool_station `filters:` (channel guards) so sensor core
+            # does not treat them as the standard filter registry.
+            await sensor.register_sensor(ch_var, sensor_register_config(ch_conf))
             
             # Configure channel-specific properties
             cg.add(ch_var.set_channel_type(channel_type))
