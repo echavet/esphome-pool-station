@@ -56,8 +56,7 @@ void CalibrationEngine::add_point(float x, float y) {
   points.push_back(pt);
   this->poly_coeffs_valid_ = false;
   
-  // Keep points sorted by x for piecewise
-  std::sort(points.begin(), points.end(), CalibrationPoint::compare_by_x);
+  // Do not sort: HA Capturer entities map to slot indices.
   
   if (this->draft_mode_enabled_) {
     this->has_draft_changes_ = true;
@@ -80,8 +79,7 @@ void CalibrationEngine::set_point(size_t index, float x, float y) {
   points[index].y = y;
   this->poly_coeffs_valid_ = false;
   
-  // Re-sort after modification
-  std::sort(points.begin(), points.end(), CalibrationPoint::compare_by_x);
+  // Do not re-sort: keep HA slot indices stable.
   
   if (this->draft_mode_enabled_) {
     this->has_draft_changes_ = true;
@@ -144,12 +142,9 @@ const std::vector<CalibrationPoint> &CalibrationEngine::get_points() const {
 }
 
 void CalibrationEngine::set_seed_points(const std::vector<CalibrationPoint> &points) {
-  // Seed points go to live set
+  // Seed points go to live set in YAML/slot order (do not sort).
   this->live_points_ = points;
   this->poly_coeffs_valid_ = false;
-  
-  // Sort by x
-  std::sort(this->live_points_.begin(), this->live_points_.end(), CalibrationPoint::compare_by_x);
   
   // If draft mode is enabled, also copy to draft
   if (this->draft_mode_enabled_) {
@@ -254,8 +249,28 @@ uint8_t CalibrationEngine::get_minimum_points() const {
   return this->get_minimum_points_for_type(this->type_);
 }
 
+bool CalibrationEngine::is_type_implemented(CalibrationType type) {
+  switch (type) {
+    case CAL_TYPE_NONE:
+    case CAL_TYPE_LINEAR:
+    case CAL_TYPE_POLYNOMIAL:
+    case CAL_TYPE_PIECEWISE:
+    case CAL_TYPE_DFROBOT_ORP:
+      return true;
+    case CAL_TYPE_EXPONENTIAL:
+    case CAL_TYPE_LOGARITHMIC:
+    case CAL_TYPE_POWER:
+    default:
+      return false;
+  }
+}
+
 bool CalibrationEngine::is_valid() const {
   // Uses LIVE points for validation (actual calibration state)
+  if (!this->is_implemented()) {
+    return false;
+  }
+
   if (this->type_ == CAL_TYPE_NONE) {
     return false;
   }
@@ -283,6 +298,10 @@ bool CalibrationEngine::is_valid() const {
 
 bool CalibrationEngine::is_draft_valid() const {
   // Validates the draft set (for UI feedback)
+  if (!this->is_implemented()) {
+    return false;
+  }
+
   if (this->type_ == CAL_TYPE_NONE) {
     return false;
   }
@@ -307,26 +326,55 @@ bool CalibrationEngine::is_draft_valid() const {
   return true;
 }
 
+float CalibrationEngine::apply_precision_(float value) const {
+  if (std::isnan(value)) {
+    return value;
+  }
+  float scale = std::pow(10.0f, static_cast<float>(this->precision_decimals_));
+  return std::round(value * scale) / scale;
+}
+
+std::vector<CalibrationPoint> CalibrationEngine::valid_points_copy_(
+    const std::vector<CalibrationPoint> &src, bool sort_by_x) const {
+  std::vector<CalibrationPoint> out;
+  out.reserve(src.size());
+  for (const auto &pt : src) {
+    if (pt.is_valid()) {
+      out.push_back(pt);
+    }
+  }
+  if (sort_by_x) {
+    std::sort(out.begin(), out.end(), CalibrationPoint::compare_by_x);
+  }
+  return out;
+}
+
 float CalibrationEngine::calibrate(float raw_voltage) const {
   if (std::isnan(raw_voltage)) {
     return NAN;
   }
-  
+
+  float result = raw_voltage;
   switch (this->type_) {
     case CAL_TYPE_NONE:
-      return raw_voltage;  // Pass-through
+      result = raw_voltage;  // Pass-through
+      break;
       
     case CAL_TYPE_LINEAR:
-      return this->calibrate_linear_(raw_voltage);
+      result = this->calibrate_linear_(raw_voltage);
+      break;
       
     case CAL_TYPE_POLYNOMIAL:
-      return this->calibrate_polynomial_(raw_voltage);
+      result = this->calibrate_polynomial_(raw_voltage);
+      break;
       
     case CAL_TYPE_PIECEWISE:
-      return this->calibrate_piecewise_(raw_voltage);
+      result = this->calibrate_piecewise_(raw_voltage);
+      break;
       
     case CAL_TYPE_DFROBOT_ORP:
-      return this->calibrate_dfrobot_orp_(raw_voltage);
+      result = this->calibrate_dfrobot_orp_(raw_voltage);
+      break;
       
     case CAL_TYPE_EXPONENTIAL:
     case CAL_TYPE_LOGARITHMIC:
@@ -334,34 +382,48 @@ float CalibrationEngine::calibrate(float raw_voltage) const {
       // TODO: implement these algorithms
       ESP_LOGW(CAL_TAG, "Calibration type '%s' not yet implemented, using pass-through",
                this->get_type_name());
-      return raw_voltage;
+      result = raw_voltage;
+      break;
       
     default:
-      return raw_voltage;
+      result = raw_voltage;
+      break;
   }
+  return this->apply_precision_(result);
 }
 
 float CalibrationEngine::calibrate_linear_(float x) const {
-  // Always use live points for actual calibration
-  if (this->live_points_.size() < 2) {
-    ESP_LOGW(CAL_TAG, "Linear calibration needs 2 points, have %zu", this->live_points_.size());
+  // Least-squares fit on all valid live points (N==2 equals the two-point line).
+  // Do not mutate live_points_ — HA slots stay in capture/YAML order.
+  auto pts = this->valid_points_copy_(this->live_points_, false);
+  if (pts.size() < 2) {
+    ESP_LOGW(CAL_TAG, "Linear calibration needs 2 points, have %zu", pts.size());
     return x;
   }
-  
-  // Use first and last points for linear
-  const CalibrationPoint &p1 = this->live_points_.front();
-  const CalibrationPoint &p2 = this->live_points_.back();
-  
-  if (std::abs(p2.x - p1.x) < 1e-9f) {
-    ESP_LOGW(CAL_TAG, "Linear calibration: points have same x value");
-    return p1.y;
+
+  double n = static_cast<double>(pts.size());
+  double sum_x = 0.0;
+  double sum_y = 0.0;
+  double sum_xx = 0.0;
+  double sum_xy = 0.0;
+  for (const auto &pt : pts) {
+    double xi = pt.x;
+    double yi = pt.y;
+    sum_x += xi;
+    sum_y += yi;
+    sum_xx += xi * xi;
+    sum_xy += xi * yi;
   }
-  
-  // y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
-  float slope = (p2.y - p1.y) / (p2.x - p1.x);
-  float result = p1.y + (x - p1.x) * slope;
-  
-  return result;
+
+  double denom = n * sum_xx - sum_x * sum_x;
+  if (std::abs(denom) < 1e-12) {
+    ESP_LOGW(CAL_TAG, "Linear calibration: points have same x value");
+    return static_cast<float>(sum_y / n);
+  }
+
+  double slope = (n * sum_xy - sum_x * sum_y) / denom;
+  double intercept = (sum_y - slope * sum_x) / n;
+  return static_cast<float>(intercept + slope * static_cast<double>(x));
 }
 
 float CalibrationEngine::calibrate_polynomial_(float x) const {
@@ -390,8 +452,9 @@ void CalibrationEngine::compute_polynomial_coefficients_() const {
   this->poly_coeffs_.clear();
   this->poly_coeffs_valid_ = false;
   
-  // Always use live points for actual calibration
-  size_t n = this->live_points_.size();
+  // Always use live points for actual calibration (skip invalid slots)
+  auto pts = this->valid_points_copy_(this->live_points_, false);
+  size_t n = pts.size();
   uint8_t order = this->polynomial_order_;
   
   if (n < order + 1) {
@@ -417,7 +480,7 @@ void CalibrationEngine::compute_polynomial_coefficients_() const {
     for (size_t j = 0; j < terms; j++) {
       float sum = 0.0f;
       for (size_t k = 0; k < n; k++) {
-        float xi = this->live_points_[k].x;
+        float xi = pts[k].x;
         sum += std::pow(xi, (float)(i + j));
       }
       matrix[i][j] = sum;
@@ -426,8 +489,8 @@ void CalibrationEngine::compute_polynomial_coefficients_() const {
     // X^T * y
     float sum = 0.0f;
     for (size_t k = 0; k < n; k++) {
-      float xi = this->live_points_[k].x;
-      float yi = this->live_points_[k].y;
+      float xi = pts[k].x;
+      float yi = pts[k].y;
       sum += yi * std::pow(xi, (float)i);
     }
     matrix[i][terms] = sum;
@@ -483,36 +546,34 @@ void CalibrationEngine::compute_polynomial_coefficients_() const {
 }
 
 float CalibrationEngine::calibrate_piecewise_(float x) const {
-  // Always use live points for actual calibration
-  if (this->live_points_.size() < 2) {
-    ESP_LOGW(CAL_TAG, "Piecewise calibration needs at least 2 points, have %zu", this->live_points_.size());
+  // Sort a working copy only — stored slot indices stay YAML/HA stable.
+  auto pts = this->valid_points_copy_(this->live_points_, true);
+  if (pts.size() < 2) {
+    ESP_LOGW(CAL_TAG, "Piecewise calibration needs at least 2 points, have %zu", pts.size());
     return x;
   }
   
-  // Points are sorted by x
-  // Find the segment containing x
-  
   // Below first point: extrapolate from first segment
-  if (x <= this->live_points_.front().x) {
-    const CalibrationPoint &p1 = this->live_points_[0];
-    const CalibrationPoint &p2 = this->live_points_[1];
+  if (x <= pts.front().x) {
+    const CalibrationPoint &p1 = pts[0];
+    const CalibrationPoint &p2 = pts[1];
     float slope = (p2.y - p1.y) / (p2.x - p1.x);
     return p1.y + (x - p1.x) * slope;
   }
   
   // Above last point: extrapolate from last segment
-  if (x >= this->live_points_.back().x) {
-    size_t n = this->live_points_.size();
-    const CalibrationPoint &p1 = this->live_points_[n - 2];
-    const CalibrationPoint &p2 = this->live_points_[n - 1];
+  if (x >= pts.back().x) {
+    size_t n = pts.size();
+    const CalibrationPoint &p1 = pts[n - 2];
+    const CalibrationPoint &p2 = pts[n - 1];
     float slope = (p2.y - p1.y) / (p2.x - p1.x);
     return p2.y + (x - p2.x) * slope;
   }
   
-  // Find segment [i, i+1] where live_points_[i].x <= x < live_points_[i+1].x
-  for (size_t i = 0; i < this->live_points_.size() - 1; i++) {
-    const CalibrationPoint &p1 = this->live_points_[i];
-    const CalibrationPoint &p2 = this->live_points_[i + 1];
+  // Find segment [i, i+1] where pts[i].x <= x < pts[i+1].x
+  for (size_t i = 0; i < pts.size() - 1; i++) {
+    const CalibrationPoint &p1 = pts[i];
+    const CalibrationPoint &p2 = pts[i + 1];
     
     if (x >= p1.x && x <= p2.x) {
       if (std::abs(p2.x - p1.x) < 1e-9f) {
@@ -577,19 +638,15 @@ void CalibrationEngine::load_from_preferences() {
     this->calibration_temperature_ = NAN;  // Legacy format had no Tw
   }
   
-  // Restore points to live set
+  // Restore points to live set in saved slot order (including NaN holes).
+  // Do not sort or compact: HA Capturer indices must survive reboot.
   this->live_points_.clear();
   for (uint8_t i = 0; i < data.point_count && i < MAX_CALIBRATION_POINTS; i++) {
     CalibrationPoint pt;
     pt.x = data.points_x[i];
     pt.y = data.points_y[i];
-    if (pt.is_valid()) {
-      this->live_points_.push_back(pt);
-    }
+    this->live_points_.push_back(pt);
   }
-  
-  // Sort by x
-  std::sort(this->live_points_.begin(), this->live_points_.end(), CalibrationPoint::compare_by_x);
   
   this->poly_coeffs_valid_ = false;
   

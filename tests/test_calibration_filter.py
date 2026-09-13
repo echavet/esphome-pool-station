@@ -66,16 +66,30 @@ def is_jump_exceeded(current: float, previous: float, threshold: float) -> bool:
 # Calibration algorithms (Python equivalents)
 # =============================================================================
 
+def apply_precision(value: float, decimals: int) -> float:
+    """Round like C++ std::round (half away from zero)."""
+    if math.isnan(value):
+        return value
+    scale = 10.0 ** decimals
+    return math.copysign(math.floor(abs(value) * scale + 0.5), value) / scale
+
+
 def calibrate_linear(x: float, points: List[Tuple[float, float]]) -> float:
-    """Linear calibration using first and last points."""
-    if len(points) < 2:
+    """Least-squares linear fit on all valid points (N==2 is the two-point line)."""
+    valid = [(px, py) for px, py in points if not (math.isnan(px) or math.isnan(py))]
+    if len(valid) < 2:
         return x
-    p1 = points[0]
-    p2 = points[-1]
-    if abs(p2[0] - p1[0]) < 1e-9:
-        return p1[1]
-    slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
-    return p1[1] + (x - p1[0]) * slope
+    n = float(len(valid))
+    sum_x = sum(p[0] for p in valid)
+    sum_y = sum(p[1] for p in valid)
+    sum_xx = sum(p[0] * p[0] for p in valid)
+    sum_xy = sum(p[0] * p[1] for p in valid)
+    denom = n * sum_xx - sum_x * sum_x
+    if abs(denom) < 1e-12:
+        return sum_y / n
+    slope = (n * sum_xy - sum_x * sum_y) / denom
+    intercept = (sum_y - slope * sum_x) / n
+    return intercept + slope * x
 
 
 def calibrate_piecewise(x: float, points: List[Tuple[float, float]]) -> float:
@@ -202,6 +216,32 @@ class TestCalibrationLinear(unittest.TestCase):
         self.assertAlmostEqual(calibrate_linear(0.0, points), -1.25)
         # Extrapolate above
         self.assertAlmostEqual(calibrate_linear(5.0, points), 11.25)
+
+    def test_linear_least_squares_n_gt_2(self):
+        """N>2 uses all valid points, not first/last only."""
+        # y = 2x + 1, plus a midpoint that would be ignored by first/last
+        # if first/last were (0,1) and (4,9) the line is the same; add an
+        # off-line first/last trap: first=(0,0), last=(4,0), mid=(2,2)
+        # first/last would give y=0; least-squares slope = 0, intercept = 2/3.
+        points = [(0.0, 0.0), (2.0, 2.0), (4.0, 0.0)]
+        self.assertAlmostEqual(calibrate_linear(2.0, points), 2.0 / 3.0)
+        self.assertNotAlmostEqual(calibrate_linear(2.0, points), 0.0)
+
+    def test_linear_ignores_nan_slots(self):
+        """NaN HA holes are skipped; stored order is irrelevant."""
+        points = [(2.0, 10.0), (float("nan"), float("nan")), (0.0, 0.0)]
+        self.assertAlmostEqual(calibrate_linear(1.0, points), 5.0)
+
+
+class TestApplyPrecision(unittest.TestCase):
+    """YAML precision_decimals applied to calibrated output."""
+
+    def test_round_two_decimals(self):
+        self.assertAlmostEqual(apply_precision(7.126, 2), 7.13)
+        self.assertAlmostEqual(apply_precision(7.124, 2), 7.12)
+
+    def test_nan_passthrough(self):
+        self.assertTrue(math.isnan(apply_precision(float("nan"), 2)))
 
 
 class TestCalibrationPiecewise(unittest.TestCase):

@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.16] - 2026-09-13
+
+### Fixed — Lot-2 review-fix ports (clean re-implementation on v0.7.15)
+
+Selective ports of remaining Lot-2 review intents onto current `main`.
+Does **not** apply the old Lot-2 WIP tree. Capturer sync from 0.7.14/0.7.15
+and the v0.7.15 number `register_component` fix are preserved.
+
+#### Stable NVS preferences key (operational)
+- **Problem**: `generate_preferences_key` used `hash((base_key, channel_type)) & 0xFFFFFFFF`.
+  Python's `hash()` is randomized per process (`PYTHONHASHSEED`), so a recompile
+  could orphan flash-saved calibration.
+- **Fix**: deterministic MD5 (`ps-md5-v1`) in `prefs_key.py`. Same component id +
+  channel type always yields the same uint32 key.
+- **Migration**: old PYTHONHASHSEED keys cannot be reconstructed. After flashing
+  0.7.16, previously persisted calibration will not load — **one-time recapture
+  and Save** per channel. If the MD5 payload scheme is ever bumped, document
+  another one-time recal the same way.
+
+#### HA slot-stable calibration points
+- Stopped in-place `std::sort` / compact on `live_points_` / draft slots
+  (`add_point`, `set_point`, `set_seed_points`, prefs load).
+- Piecewise (and other math) sorts a **working copy** of valid points only.
+- YAML / Capturer HA entity indices stay aligned after capture, edit, and reboot.
+
+#### `precision` applied to calibrated output
+- YAML `calibration.precision` was stored (`precision_decimals_`) but never
+  applied. `calibrate()` now rounds the result with `apply_precision_`.
+
+#### Honest `is_implemented()` for stub algorithms
+- `exponential` / `logarithmic` / `power` remain stubs (select still lists only
+  implemented algos). `is_implemented()` is false for those types, so
+  `is_valid()` / `cal_invalid` reflect reality.
+
+#### Nested `calibration_mode` parent bind
+- Nested `__init__.py` path now calls `set_parent` on the calibration mode
+  switch (standalone `switch.py` already did). Toggling the nested switch
+  actually enables calibration-mode sampling.
+
+### Changed
+- Linear calibration uses least-squares on all valid points (N==2 is still the
+  two-point line; N>2 is a better fit than first/last).
+- Root `.gitignore` now ignores `build/` and `.esphome/`.
+
+---
+
 ## [0.7.15] - 2026-09-13
 
 ### Fixed — Capturer Number Codegen Double-Registers Component
@@ -768,7 +814,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.15** | ✅ **HA polish, runtime algo select, draft/commit, Capturer UI sync** | **Current** |
+| **7** | **0.7.16** | ✅ **HA polish, runtime algo select, draft/commit, Capturer UI sync, Lot-2 review-fix ports** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

@@ -27,6 +27,7 @@ from esphome.const import (
 from esphome.core import coroutine
 from .sensor_register_compat import sensor_register_config
 from .algorithm_select_options import algorithm_select_options
+from .prefs_key import generate_preferences_key
 
 CODEOWNERS = ["@echavet"]
 MULTI_CONF = False
@@ -900,12 +901,6 @@ CONFIG_SCHEMA = cv.Schema({
 }).extend(cv.COMPONENT_SCHEMA)
 
 
-def generate_preferences_key(base_key, channel_type):
-    """Generate a unique preferences key for calibration storage."""
-    # Use a hash based on base_key and channel type
-    return hash((base_key, channel_type)) & 0xFFFFFFFF
-
-
 async def setup_capturer_ui(config, parent_var, channel_var, channel_type, channel_key):
     """Setup Capturer UI entities for a channel.
     
@@ -1399,10 +1394,12 @@ async def to_code(config):
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
     cg.add(var.set_calibration_interval(config[CONF_CALIBRATION_INTERVAL]))
     
-    # Setup calibration mode switch
+    # Setup calibration mode switch (nested path; standalone switch.py
+    # already calls set_parent).
     if CONF_CALIBRATION_MODE in config:
         cal_conf = config[CONF_CALIBRATION_MODE]
         cal_switch = await switch.new_switch(cal_conf)
+        cg.add(cal_switch.set_parent(var))
         cg.add(var.set_calibration_mode_switch(cal_switch))
     
     # Setup channels

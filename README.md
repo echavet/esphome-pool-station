@@ -43,6 +43,7 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 - ✅ **Add/remove calibration points**: Dynamic point management from UI
 - ✅ **Point count number**: Live engine count + optional resize (1-10)
 - ✅ **Capturer UI sync**: Add/Remove/Save/capture/algo refresh HA numbers (v0.7.15)
+- ✅ **Stable NVS keys + slot-stable points**: MD5 prefs key, HA indices not reshuffled (v0.7.16)
 - ✅ **Draft/Commit workflow**: Edit draft, preview, then commit or discard
 - ✅ **Draft pending sensor**: Shows when uncommitted changes exist
 - ✅ **Migration documentation**: From j5_ha_bridge and pool-firmata-wifi
@@ -202,7 +203,7 @@ Formula: `ORP_mV = mid_mv - (raw_voltage × 1000) - offset_mv`
 
 | Algorithm | Min Points | Use Case | Parameters | Status |
 |-----------|------------|----------|------------|--------|
-| `linear` | 2 | Simple linear sensors (pressure) | — | ✅ Implemented |
+| `linear` | 2 | Simple linear sensors (pressure) | least-squares on all valid points | ✅ Implemented |
 | `piecewise` | 2 | pH sensors, non-linear but monotonic | — | ✅ Implemented |
 | `polynomial` | order+1 | Complex curves | `order` (1-5), `precision` | ✅ Implemented |
 | `dfrobot_orp` | 0 | DFRobot SEN0165 ORP modules | `mid_mv`, `offset_mv` | ✅ Implemented |
@@ -210,7 +211,7 @@ Formula: `ORP_mV = mid_mv - (raw_voltage × 1000) - offset_mv`
 | `logarithmic` | 2 | — | — | ⚠️ **NOT IMPLEMENTED** (pass-through) |
 | `power` | 2 | — | — | ⚠️ **NOT IMPLEMENTED** (pass-through) |
 
-> **Note**: The `exponential`, `logarithmic`, and `power` algorithms are reserved for future implementation. Currently they fall back to pass-through (raw value returned unchanged). Do not use them in production configurations.
+> **Note**: The `exponential`, `logarithmic`, and `power` algorithms are reserved for future implementation. They fall back to pass-through and `is_valid()` is **false** so `cal_invalid` stays honest. Do not use them in production configurations.
 
 ## Hardware Reference
 
@@ -442,7 +443,7 @@ Use calibration mode when:
 | 4 | 0.4.0 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
 | 5 | 0.5.0 | Water temperature compensation (Tw) | ✅ Done |
 | 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
-| **7** | **0.7.0** | **HA polish, runtime algo select, draft/commit** | ✅ **Current** |
+| **7** | **0.7.16** | **HA polish, runtime algo select, draft/commit, Lot-2 review-fix ports** | ✅ **Current** |
 | 8 | — | (Optional) Interference detection, EZO support | 🔮 Future |
 
 ### Lot 8 — Future / Out of Scope
