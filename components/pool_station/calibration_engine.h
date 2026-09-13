@@ -85,8 +85,8 @@ struct CalibrationPrefsData {
   float calibration_temperature{NAN};  // Tw in °C when calibration was saved
 };
 
-static constexpr uint32_t CALIBRATION_PREFS_MAGIC_V2 = 0xCAL10002;  // Lot 2 magic (legacy)
-static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCAL10005;     // Lot 5 magic (with Tw)
+static constexpr uint32_t CALIBRATION_PREFS_MAGIC_V2 = 0xCA110002;  // Lot 2 magic (legacy)
+static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCA110005;     // Lot 5 magic (with Tw)
 
 /**
  * Calibration Engine - computes calibrated values from raw readings.

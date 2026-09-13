@@ -368,9 +368,6 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   // Gate (Lot 6)
   MeasurementGate *gate_{nullptr};
   GateBlockedBinarySensor *gate_blocked_sensor_{nullptr};
-  
-  // Callback ID for source sensor subscription
-  optional<CallbackManager<void(float)>::CancelToken> source_callback_;
 };
 
 
