@@ -889,7 +889,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
             }
             btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
-            await cg.register_component(btn_var, btn_conf)
             await button.register_button(btn_var, btn_conf)
             cg.add(btn_var.set_parent(parent_var))
             cg.add(btn_var.set_channel_type(channel_type))
@@ -906,7 +905,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_UNIT_OF_MEASUREMENT: "V",
             }
             num_x_var = cg.new_Pvariable(num_x_conf[CONF_ID])
-            await cg.register_component(num_x_var, num_x_conf)
             await number.register_number(
                 num_x_var, num_x_conf,
                 min_value=-10.0,
@@ -929,7 +927,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_UNIT_OF_MEASUREMENT: defaults.get("y_unit", ""),
             }
             num_y_var = cg.new_Pvariable(num_y_conf[CONF_ID])
-            await cg.register_component(num_y_var, num_y_conf)
             await number.register_number(
                 num_y_var, num_y_conf,
                 min_value=defaults.get("y_min", -1000.0),
@@ -951,7 +948,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
         }
         save_var = cg.new_Pvariable(save_conf[CONF_ID])
-        await cg.register_component(save_var, save_conf)
         await button.register_button(save_var, save_conf)
         cg.add(save_var.set_parent(parent_var))
         cg.add(save_var.set_channel_type(channel_type))
@@ -967,7 +963,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             CONF_UNIT_OF_MEASUREMENT: "mV",
         }
         mid_var = cg.new_Pvariable(mid_conf[CONF_ID])
-        await cg.register_component(mid_var, mid_conf)
         await number.register_number(
             mid_var, mid_conf,
             min_value=0.0,
@@ -989,7 +984,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             CONF_UNIT_OF_MEASUREMENT: "mV",
         }
         offset_var = cg.new_Pvariable(offset_conf[CONF_ID])
-        await cg.register_component(offset_var, offset_conf)
         await number.register_number(
             offset_var, offset_conf,
             min_value=-1000.0,
@@ -1008,7 +1002,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_ALGORITHM_SELECT in capturer_conf:
         algo_conf = capturer_conf[CONF_ALGORITHM_SELECT]
         algo_var = cg.new_Pvariable(algo_conf[CONF_ID])
-        await cg.register_component(algo_var, algo_conf)
         await select.register_select(algo_var, algo_conf, options=[])
         cg.add(algo_var.set_parent(parent_var))
         cg.add(algo_var.set_channel_type(channel_type))
@@ -1017,7 +1010,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_ADD_POINT_BUTTON in capturer_conf:
         add_conf = capturer_conf[CONF_ADD_POINT_BUTTON]
         add_var = cg.new_Pvariable(add_conf[CONF_ID])
-        await cg.register_component(add_var, add_conf)
         await button.register_button(add_var, add_conf)
         cg.add(add_var.set_parent(parent_var))
         cg.add(add_var.set_channel_type(channel_type))
@@ -1026,7 +1018,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_REMOVE_POINT_BUTTON in capturer_conf:
         remove_conf = capturer_conf[CONF_REMOVE_POINT_BUTTON]
         remove_var = cg.new_Pvariable(remove_conf[CONF_ID])
-        await cg.register_component(remove_var, remove_conf)
         await button.register_button(remove_var, remove_conf)
         cg.add(remove_var.set_parent(parent_var))
         cg.add(remove_var.set_channel_type(channel_type))
@@ -1035,7 +1026,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_POINT_COUNT_NUMBER in capturer_conf:
         count_conf = capturer_conf[CONF_POINT_COUNT_NUMBER]
         count_var = cg.new_Pvariable(count_conf[CONF_ID])
-        await cg.register_component(count_var, count_conf)
         await number.register_number(
             count_var, count_conf,
             min_value=1.0,
@@ -1053,7 +1043,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_COMMIT_BUTTON in capturer_conf:
         commit_conf = capturer_conf[CONF_COMMIT_BUTTON]
         commit_var = cg.new_Pvariable(commit_conf[CONF_ID])
-        await cg.register_component(commit_var, commit_conf)
         await button.register_button(commit_var, commit_conf)
         cg.add(commit_var.set_parent(parent_var))
         cg.add(commit_var.set_channel_type(channel_type))
@@ -1062,7 +1051,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_DISCARD_BUTTON in capturer_conf:
         discard_conf = capturer_conf[CONF_DISCARD_BUTTON]
         discard_var = cg.new_Pvariable(discard_conf[CONF_ID])
-        await cg.register_component(discard_var, discard_conf)
         await button.register_button(discard_var, discard_conf)
         cg.add(discard_var.set_parent(parent_var))
         cg.add(discard_var.set_channel_type(channel_type))
@@ -1071,7 +1059,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_DRAFT_PENDING in capturer_conf:
         pending_conf = capturer_conf[CONF_DRAFT_PENDING]
         pending_var = cg.new_Pvariable(pending_conf[CONF_ID])
-        await cg.register_component(pending_var, pending_conf)
         await binary_sensor.register_binary_sensor(pending_var, pending_conf)
         cg.add(pending_var.set_parent(parent_var))
         cg.add(pending_var.set_channel_type(channel_type))
@@ -1114,7 +1101,6 @@ async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, ch
     if CONF_NOISY_FLAG in diag_conf:
         noisy_conf = diag_conf[CONF_NOISY_FLAG]
         noisy_var = cg.new_Pvariable(noisy_conf[CONF_ID])
-        await cg.register_component(noisy_var, noisy_conf)
         await binary_sensor.register_binary_sensor(noisy_var, noisy_conf)
         cg.add(noisy_var.set_parent(parent_var))
         cg.add(noisy_var.set_channel_type(channel_type))
@@ -1123,7 +1109,6 @@ async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, ch
     if CONF_STUCK_FLAG in diag_conf:
         stuck_conf = diag_conf[CONF_STUCK_FLAG]
         stuck_var = cg.new_Pvariable(stuck_conf[CONF_ID])
-        await cg.register_component(stuck_var, stuck_conf)
         await binary_sensor.register_binary_sensor(stuck_var, stuck_conf)
         cg.add(stuck_var.set_parent(parent_var))
         cg.add(stuck_var.set_channel_type(channel_type))
@@ -1132,7 +1117,6 @@ async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, ch
     if CONF_OUT_OF_RANGE_FLAG in diag_conf:
         oor_conf = diag_conf[CONF_OUT_OF_RANGE_FLAG]
         oor_var = cg.new_Pvariable(oor_conf[CONF_ID])
-        await cg.register_component(oor_var, oor_conf)
         await binary_sensor.register_binary_sensor(oor_var, oor_conf)
         cg.add(oor_var.set_parent(parent_var))
         cg.add(oor_var.set_channel_type(channel_type))
@@ -1155,7 +1139,6 @@ async def setup_temperature_compensation(config, parent_var, channel_var, channe
     if CONF_TEMP_COMP_SWITCH in temp_comp_conf:
         sw_conf = temp_comp_conf[CONF_TEMP_COMP_SWITCH]
         sw_var = cg.new_Pvariable(sw_conf[CONF_ID])
-        await cg.register_component(sw_var, sw_conf)
         await switch.register_switch(sw_var, sw_conf)
         cg.add(sw_var.set_parent(parent_var))
         cg.add(sw_var.set_channel_type(channel_type))
@@ -1220,7 +1203,6 @@ async def setup_channel_gate(config, parent_var, channel_var, channel_type, chan
     if gate_conf is not None and CONF_GATE_BLOCKED in gate_conf:
         blocked_conf = gate_conf[CONF_GATE_BLOCKED]
         blocked_var = cg.new_Pvariable(blocked_conf[CONF_ID])
-        await cg.register_component(blocked_var, blocked_conf)
         await binary_sensor.register_binary_sensor(blocked_var, blocked_conf)
         cg.add(blocked_var.set_gate(gate_var))
         cg.add(channel_var.set_gate_blocked_sensor(blocked_var))
@@ -1285,7 +1267,6 @@ async def setup_campaigns(config, parent_var):
         if CONF_CAMPAIGN_START_BUTTON in camp_conf:
             btn_conf = camp_conf[CONF_CAMPAIGN_START_BUTTON]
             btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
-            await cg.register_component(btn_var, btn_conf)
             await button.register_button(btn_var, btn_conf)
             cg.add(btn_var.set_campaign(camp_var))
         
@@ -1293,7 +1274,6 @@ async def setup_campaigns(config, parent_var):
         if CONF_CAMPAIGN_ABORT_BUTTON in camp_conf:
             btn_conf = camp_conf[CONF_CAMPAIGN_ABORT_BUTTON]
             btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
-            await cg.register_component(btn_var, btn_conf)
             await button.register_button(btn_var, btn_conf)
             cg.add(btn_var.set_campaign(camp_var))
         
@@ -1301,7 +1281,6 @@ async def setup_campaigns(config, parent_var):
         if CONF_CAMPAIGN_RUNNING in camp_conf:
             running_conf = camp_conf[CONF_CAMPAIGN_RUNNING]
             running_var = cg.new_Pvariable(running_conf[CONF_ID])
-            await cg.register_component(running_var, running_conf)
             await binary_sensor.register_binary_sensor(running_var, running_conf)
             cg.add(running_var.set_campaign(camp_var))
             cg.add(camp_var.set_running_sensor(running_var))
@@ -1317,7 +1296,6 @@ async def setup_campaigns(config, parent_var):
                 if ch_key in result_conf:
                     res_sens_conf = result_conf[ch_key]
                     res_sens_var = cg.new_Pvariable(res_sens_conf[CONF_ID])
-                    await cg.register_component(res_sens_var, res_sens_conf)
                     await sensor.register_sensor(res_sens_var, res_sens_conf)
                     cg.add(res_sens_var.set_campaign(camp_var))
                     cg.add(res_sens_var.set_channel_type(ch_type))
@@ -1341,7 +1319,6 @@ async def to_code(config):
     if CONF_CALIBRATION_MODE in config:
         cal_conf = config[CONF_CALIBRATION_MODE]
         cal_switch = await switch.new_switch(cal_conf)
-        await cg.register_component(cal_switch, cal_conf)
         cg.add(var.set_calibration_mode_switch(cal_switch))
     
     # Setup channels
@@ -1430,7 +1407,6 @@ async def to_code(config):
             if CONF_CAL_INVALID in ch_conf:
                 cal_inv_conf = ch_conf[CONF_CAL_INVALID]
                 cal_inv_var = cg.new_Pvariable(cal_inv_conf[CONF_ID])
-                await cg.register_component(cal_inv_var, cal_inv_conf)
                 await binary_sensor.register_binary_sensor(cal_inv_var, cal_inv_conf)
                 cg.add(cal_inv_var.set_parent(var))
                 cg.add(cal_inv_var.set_channel_type(channel_type))

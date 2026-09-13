@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-09-13
+
+### Fixed — Codegen Double Registration Bug
+
+#### CRIT: Component ID Double Registration (ValueError)
+- **Root cause**: ESPHome helper functions (`button.register_button()`, `number.register_number()`, `select.register_select()`, `binary_sensor.register_binary_sensor()`, `switch.register_switch()`, `switch.new_switch()`) internally call `cg.register_component()` when the C++ class inherits from `Component`
+- The Python codegen was calling `await cg.register_component()` explicitly BEFORE these helpers, causing double registration
+- This triggered `ValueError: Component ID xxx was not declared to inherit from Component, or was registered twice`
+- Affected all Capturer UI buttons (capture, save, add/remove, commit/discard), numbers (point X/Y, mid/offset, point count), selects (algorithm), and binary sensors (draft_pending, diagnostic flags, gate_blocked, campaign_running, cal_invalid)
+- **Fix**: Removed redundant `cg.register_component()` calls before all `register_*` helper calls
+- Pattern now matches ESPHome core components (single registration via helpers)
+
+---
+
 ## [0.7.1] - 2026-09-13
 
 ### Fixed — Code Review Issues (PR #9)
@@ -519,7 +533,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.0** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.2** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)
