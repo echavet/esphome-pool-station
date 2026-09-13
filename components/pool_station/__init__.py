@@ -292,9 +292,10 @@ CALIBRATION_TYPES = {
     "polynomial": 2,
     "piecewise": 3,
     "dfrobot_orp": 4,
-    "exponential": 5,  # TODO
-    "logarithmic": 6,  # TODO
-    "power": 7,        # TODO
+    # WARNING: The following types are NOT IMPLEMENTED - they fall back to pass-through
+    "exponential": 5,  # NOT IMPLEMENTED - pass-through
+    "logarithmic": 6,  # NOT IMPLEMENTED - pass-through
+    "power": 7,        # NOT IMPLEMENTED - pass-through
 }
 
 # Water temperature (for future lots)
@@ -339,12 +340,21 @@ CHANNEL_DEFAULTS = {
 }
 
 
+UNIMPLEMENTED_CALIBRATION_TYPES = {"exponential", "logarithmic", "power"}
+
 def validate_calibration_type(value):
     """Validate calibration type string."""
+    import logging
     value = cv.string_strict(value).lower()
     if value not in CALIBRATION_TYPES:
         raise cv.Invalid(
             f"Unknown calibration type '{value}'. Valid types: {list(CALIBRATION_TYPES.keys())}"
+        )
+    # Warn about unimplemented types (CRIT-03 fix)
+    if value in UNIMPLEMENTED_CALIBRATION_TYPES:
+        logging.warning(
+            f"Calibration type '{value}' is NOT IMPLEMENTED and will fall back to pass-through. "
+            f"Use 'linear', 'polynomial', 'piecewise', or 'dfrobot_orp' instead."
         )
     return value
 
@@ -1178,7 +1188,7 @@ async def setup_channel_gate(config, parent_var, channel_var, channel_type, chan
     if sample_when_conf is not None:
         conditions.extend(sample_when_conf)
     
-    # Add conditions to gate
+    # Add conditions to gate using explicit setter methods (CRIT-01 fix)
     for cond_conf in conditions:
         cond_name = cond_conf.get(CONF_NAME, "")
         
@@ -1186,28 +1196,13 @@ async def setup_channel_gate(config, parent_var, channel_var, channel_type, chan
             # Binary sensor condition
             bs_ref = await cg.get_variable(cond_conf[CONF_GATE_BINARY_SENSOR])
             desired_state = cond_conf.get(CONF_GATE_DESIRED_STATE, True)
-            
-            # Create condition struct and add to gate
-            cg.add(gate_var.add_condition(cg.StructInitializer(
-                pool_station_ns.struct("GateCondition"),
-                ("type", pool_station_ns.GATE_COND_BINARY_SENSOR),
-                ("binary_sensor_ref", bs_ref),
-                ("desired_state", desired_state),
-                ("name", cond_name),
-            )))
+            cg.add(gate_var.add_binary_sensor_condition(bs_ref, desired_state, cond_name))
         
         elif CONF_GATE_SWITCH in cond_conf:
             # Switch condition
             sw_ref = await cg.get_variable(cond_conf[CONF_GATE_SWITCH])
             desired_state = cond_conf.get(CONF_GATE_DESIRED_STATE, True)
-            
-            cg.add(gate_var.add_condition(cg.StructInitializer(
-                pool_station_ns.struct("GateCondition"),
-                ("type", pool_station_ns.GATE_COND_SWITCH),
-                ("switch_ref", sw_ref),
-                ("desired_state", desired_state),
-                ("name", cond_name),
-            )))
+            cg.add(gate_var.add_switch_condition(sw_ref, desired_state, cond_name))
         
         elif CONF_GATE_SENSOR in cond_conf:
             # Sensor threshold condition
@@ -1216,16 +1211,7 @@ async def setup_channel_gate(config, parent_var, channel_var, channel_type, chan
             op_val = THRESHOLD_OPERATORS.get(op_str, 1)  # Default to >=
             threshold = cond_conf.get(CONF_GATE_THRESHOLD, 0.0)
             tolerance = cond_conf.get(CONF_GATE_THRESHOLD_TOLERANCE, 0.001)
-            
-            cg.add(gate_var.add_condition(cg.StructInitializer(
-                pool_station_ns.struct("GateCondition"),
-                ("type", pool_station_ns.GATE_COND_SENSOR_THRESHOLD),
-                ("sensor_ref", sens_ref),
-                ("threshold_op", op_val),
-                ("threshold_value", threshold),
-                ("threshold_tolerance", tolerance),
-                ("name", cond_name),
-            )))
+            cg.add(gate_var.add_sensor_threshold_condition(sens_ref, op_val, threshold, tolerance, cond_name))
     
     # Set gate on channel
     cg.add(channel_var.set_gate(gate_var))

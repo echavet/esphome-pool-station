@@ -64,6 +64,35 @@ void MeasurementGate::add_condition(const GateCondition &condition) {
   this->config_.conditions.push_back(condition);
 }
 
+void MeasurementGate::add_binary_sensor_condition(binary_sensor::BinarySensor *sensor, bool desired_state, const std::string &name) {
+  GateCondition cond;
+  cond.type = GATE_COND_BINARY_SENSOR;
+  cond.binary_sensor_ref = sensor;
+  cond.desired_state = desired_state;
+  cond.name = name;
+  this->config_.conditions.push_back(cond);
+}
+
+void MeasurementGate::add_switch_condition(switch_::Switch *sw, bool desired_state, const std::string &name) {
+  GateCondition cond;
+  cond.type = GATE_COND_SWITCH;
+  cond.switch_ref = sw;
+  cond.desired_state = desired_state;
+  cond.name = name;
+  this->config_.conditions.push_back(cond);
+}
+
+void MeasurementGate::add_sensor_threshold_condition(sensor::Sensor *sensor, uint8_t op, float threshold, float tolerance, const std::string &name) {
+  GateCondition cond;
+  cond.type = GATE_COND_SENSOR_THRESHOLD;
+  cond.sensor_ref = sensor;
+  cond.threshold_op = static_cast<ThresholdOperator>(op);
+  cond.threshold_value = threshold;
+  cond.threshold_tolerance = tolerance;
+  cond.name = name;
+  this->config_.conditions.push_back(cond);
+}
+
 bool MeasurementGate::is_open() const {
   if (!this->enabled_) {
     return true;  // Gate disabled = always open

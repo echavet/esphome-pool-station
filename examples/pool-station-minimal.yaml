@@ -160,16 +160,18 @@ sensor:
           send_every: 1
 
   # Air temperature — pump enclosure
+  # IMPORTANT: Replace with YOUR actual DS18B20 ROM address (run `esphome logs` to discover)
   - platform: dallas_temp
     one_wire_id: onewire_air
-    address: 0x70010000000000xx  # Replace with actual address
+    address: 0x7001000000000028  # ← PLACEHOLDER: replace with your actual pump air sensor address
     name: "Air Temperature (Pump)"
     id: air_pump_temp
 
   # Air temperature — local ambient
+  # IMPORTANT: Replace with YOUR actual DS18B20 ROM address (run `esphome logs` to discover)
   - platform: dallas_temp
     one_wire_id: onewire_air
-    address: 0x44010000000000xx  # Replace with actual address
+    address: 0x4401000000000028  # ← PLACEHOLDER: replace with your actual local air sensor address
     name: "Air Temperature (Local)"
     id: air_local_temp
 
@@ -592,7 +594,7 @@ pool_station:
 #   Formula: ORP_mV = mid_mv - (V * 1000) - offset_mv
 #   Use for: DFRobot ORP modules or similar
 #
-# - exponential, logarithmic, power: TODO (not implemented yet)
+# - exponential, logarithmic, power: NOT IMPLEMENTED (fall back to pass-through, do not use)
 #
 # =============================================================================
 # TEMPERATURE COMPENSATION (Lot 5)

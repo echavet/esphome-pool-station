@@ -115,9 +115,35 @@ class MeasurementGate {
   const std::string &get_name() const { return this->config_.name; }
   
   /**
-   * Add a condition to this gate.
+   * Add a condition to this gate (low-level method for complex setup).
    */
   void add_condition(const GateCondition &condition);
+  
+  /**
+   * Add a binary sensor condition to this gate.
+   * @param sensor Binary sensor to monitor
+   * @param desired_state State required for gate to open (true = ON, false = OFF)
+   * @param name Optional condition name for logging
+   */
+  void add_binary_sensor_condition(binary_sensor::BinarySensor *sensor, bool desired_state, const std::string &name = "");
+  
+  /**
+   * Add a switch condition to this gate.
+   * @param sw Switch to monitor
+   * @param desired_state State required for gate to open (true = ON, false = OFF)
+   * @param name Optional condition name for logging
+   */
+  void add_switch_condition(switch_::Switch *sw, bool desired_state, const std::string &name = "");
+  
+  /**
+   * Add a sensor threshold condition to this gate.
+   * @param sensor Sensor to monitor
+   * @param op Threshold operator (0=GT, 1=GTE, 2=LT, 3=LTE, 4=EQ)
+   * @param threshold Threshold value
+   * @param tolerance Tolerance for equality comparison
+   * @param name Optional condition name for logging
+   */
+  void add_sensor_threshold_condition(sensor::Sensor *sensor, uint8_t op, float threshold, float tolerance, const std::string &name = "");
   
   /**
    * Check if the gate is open (all conditions satisfied).
