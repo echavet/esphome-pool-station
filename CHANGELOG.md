@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-09-13
+
+### Fixed — Code Review Issues (PR #9)
+
+#### CRIT-01: Gate Condition Codegen
+- Replaced `cg.StructInitializer` with explicit setter methods
+- Added `add_binary_sensor_condition()`, `add_switch_condition()`, `add_sensor_threshold_condition()` to `MeasurementGate`
+- Python codegen now generates correct C++ method calls
+
+#### CRIT-02: Campaign Sampling Stale/NaN Values  
+- Campaign sampling now uses `get_last_valid_value()` instead of raw `channel->state`
+- NaN values are detected and skipped with a warning log
+- Prevents publishing invalid campaign results
+
+#### CRIT-03: Unimplemented Calibration Algorithms
+- Updated README to clearly mark `exponential`, `logarithmic`, `power` as **NOT IMPLEMENTED**
+- Added warning in Python codegen when these types are used
+- Updated CDC to reflect implementation status
+- Example YAML updated with clearer documentation
+
+#### HIGH-01: Campaign Channel Validation
+- Added channel existence check in `MeasurementCampaign::setup()`
+- Logs warning for each missing channel
+- Logs error if ALL channels are missing
+
+#### HIGH-05: Invalid Dallas Addresses in Examples
+- Fixed `0x70010000000000xx` and `0x44010000000000xx` placeholders
+- Replaced with valid hex addresses (ending in `28` for DS18B20)
+- Added clear comments indicating placeholders need replacement
+
+### Changed
+- CDC version updated to 0.7.1
+- `PoolStationChannelSensor` now exposes `get_last_valid_value()` and `has_valid_value()` methods
+
+---
+
 ## [0.7.0] - 2026-09-13
 
 ### Added — Lot 7: HA Polish + Migration Docs

@@ -197,15 +197,17 @@ Formula: `ORP_mV = mid_mv - (raw_voltage × 1000) - offset_mv`
 
 ## Calibration Algorithms
 
-| Algorithm | Min Points | Use Case | Parameters |
-|-----------|------------|----------|------------|
-| `linear` | 2 | Simple linear sensors (pressure) | — |
-| `piecewise` | 2 | pH sensors, non-linear but monotonic | — |
-| `polynomial` | order+1 | Complex curves | `order` (1-5), `precision` |
-| `dfrobot_orp` | 0 | DFRobot SEN0165 ORP modules | `mid_mv`, `offset_mv` |
-| `exponential` | 2 | TODO: not yet implemented | — |
-| `logarithmic` | 2 | TODO: not yet implemented | — |
-| `power` | 2 | TODO: not yet implemented | — |
+| Algorithm | Min Points | Use Case | Parameters | Status |
+|-----------|------------|----------|------------|--------|
+| `linear` | 2 | Simple linear sensors (pressure) | — | ✅ Implemented |
+| `piecewise` | 2 | pH sensors, non-linear but monotonic | — | ✅ Implemented |
+| `polynomial` | order+1 | Complex curves | `order` (1-5), `precision` | ✅ Implemented |
+| `dfrobot_orp` | 0 | DFRobot SEN0165 ORP modules | `mid_mv`, `offset_mv` | ✅ Implemented |
+| `exponential` | 2 | — | — | ⚠️ **NOT IMPLEMENTED** (pass-through) |
+| `logarithmic` | 2 | — | — | ⚠️ **NOT IMPLEMENTED** (pass-through) |
+| `power` | 2 | — | — | ⚠️ **NOT IMPLEMENTED** (pass-through) |
+
+> **Note**: The `exponential`, `logarithmic`, and `power` algorithms are reserved for future implementation. Currently they fall back to pass-through (raw value returned unchanged). Do not use them in production configurations.
 
 ## Hardware Reference
 

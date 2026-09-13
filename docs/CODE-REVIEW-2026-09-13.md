@@ -563,5 +563,30 @@ Once these are resolved, the component is ready for production use migrating fro
 
 ---
 
+---
+
+## Fixes Applied (2026-09-13)
+
+The following issues from this code review have been addressed in PR (cursor/fix-critical-review-issues):
+
+| Issue | Status | Resolution |
+|-------|--------|------------|
+| **CRIT-01** | ✅ Fixed | Replaced `cg.StructInitializer` with explicit setter methods (`add_binary_sensor_condition`, `add_switch_condition`, `add_sensor_threshold_condition`) |
+| **CRIT-02** | ✅ Fixed | Campaign sampling now uses `get_last_valid_value()` and skips NaN values with warning |
+| **CRIT-03** | ✅ Fixed | README, CDC, and example YAML updated to mark `exponential`/`logarithmic`/`power` as NOT IMPLEMENTED; added codegen warning |
+| **HIGH-01** | ✅ Fixed | Added channel validation in `MeasurementCampaign::setup()` with warnings for missing channels |
+| **HIGH-05** | ✅ Fixed | Replaced invalid Dallas addresses (`0x...xx`) with valid hex placeholders |
+| HIGH-02 | Deferred | UI number entity refresh (lower priority, requires more invasive changes) |
+| HIGH-03 | Deferred | CalibrationInvalidSensor polling optimization (functional as-is) |
+| HIGH-04 | Deferred | C++ unit tests (documentation notes Python tests are specification tests) |
+
+### Deferred Items Rationale
+
+- **HIGH-02**: Requires refactoring the number entity registration and callback system. Current behavior works, users just need to refresh the HA page.
+- **HIGH-03**: Current 1s polling is acceptable overhead; callback approach requires more testing.
+- **HIGH-04**: C++ native tests require PlatformIO setup; Python tests provide good coverage of algorithm correctness.
+
+---
+
 *Reviewed by AI Code Review Assistant*  
 *Model: claude-opus-5-thinking-high*

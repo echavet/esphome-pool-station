@@ -300,6 +300,19 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   const char *get_channel_type_name() const;
   float get_raw_value() const { return this->last_raw_value_; }
   
+  /**
+   * Get the last valid guarded value (for campaign sampling).
+   * Returns the most recent successfully processed value, or NAN if none.
+   * This is safer than accessing state directly which may be stale.
+   */
+  float get_last_valid_value() const { return this->last_guarded_value_; }
+  
+  /**
+   * Check if the channel has a valid current value.
+   * @return true if last_guarded_value_ is not NaN
+   */
+  bool has_valid_value() const { return !std::isnan(this->last_guarded_value_); }
+  
   // Calibration engine access (for UI components)
   CalibrationEngine *get_calibration_engine() { return &this->calibration_; }
 

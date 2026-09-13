@@ -118,6 +118,27 @@ void MeasurementCampaign::setup() {
     return;
   }
   
+  // HIGH-01 fix: Validate that all sample channels exist
+  if (this->parent_ != nullptr) {
+    size_t valid_channels = 0;
+    for (uint8_t channel_type : this->config_.sample_channels) {
+      PoolStationChannelSensor *channel = this->parent_->get_channel(channel_type);
+      if (channel == nullptr) {
+        ESP_LOGW(CAMPAIGN_TAG, "Campaign '%s': sample channel type %d not found! "
+                 "Campaign may fail to collect samples.",
+                 this->config_.name.c_str(), channel_type);
+      } else {
+        valid_channels++;
+      }
+    }
+    
+    if (valid_channels == 0 && !this->config_.sample_channels.empty()) {
+      ESP_LOGE(CAMPAIGN_TAG, "Campaign '%s': NO valid sample channels found! "
+               "Campaign will complete with zero samples.",
+               this->config_.name.c_str());
+    }
+  }
+  
   ESP_LOGI(CAMPAIGN_TAG, "Campaign '%s' ready:", this->config_.name.c_str());
   ESP_LOGI(CAMPAIGN_TAG, "  Prepare actions: %zu", this->config_.prepare_actions.size());
   ESP_LOGI(CAMPAIGN_TAG, "  Delay: %u ms", this->config_.delay_ms);
@@ -347,28 +368,36 @@ void MeasurementCampaign::take_samples() {
     return;  // Wait for burst delay
   }
   
-  // Sample current channel
+  // Sample current channel (CRIT-02 fix: validate value before use)
   if (this->current_channel_index_ < this->config_.sample_channels.size()) {
     uint8_t channel_type = this->config_.sample_channels[this->current_channel_index_];
     
     PoolStationChannelSensor *channel = this->parent_->get_channel(channel_type);
     if (channel != nullptr) {
-      float value = channel->state;  // Get current sensor state
+      // Use get_last_valid_value() instead of raw state to avoid stale/NaN values
+      float value = channel->get_last_valid_value();
       
-      CampaignSample sample;
-      sample.channel_type = channel_type;
-      sample.value = value;
-      sample.timestamp_ms = now;
-      sample.tag = this->config_.conditions_tag;
-      
-      this->current_result_.samples.push_back(sample);
-      
-      ESP_LOGI(CAMPAIGN_TAG, "[%s] Sample: %s = %.3f (burst %d/%d)",
-               this->config_.name.c_str(),
-               channel->get_channel_type_name(),
-               value,
-               this->current_burst_index_ + 1,
-               this->config_.burst_samples);
+      // Validate: never record NaN values as campaign results
+      if (std::isnan(value)) {
+        ESP_LOGW(CAMPAIGN_TAG, "[%s] Channel %s has no valid value (NaN), skipping sample",
+                 this->config_.name.c_str(),
+                 channel->get_channel_type_name());
+      } else {
+        CampaignSample sample;
+        sample.channel_type = channel_type;
+        sample.value = value;
+        sample.timestamp_ms = now;
+        sample.tag = this->config_.conditions_tag;
+        
+        this->current_result_.samples.push_back(sample);
+        
+        ESP_LOGI(CAMPAIGN_TAG, "[%s] Sample: %s = %.3f (burst %d/%d)",
+                 this->config_.name.c_str(),
+                 channel->get_channel_type_name(),
+                 value,
+                 this->current_burst_index_ + 1,
+                 this->config_.burst_samples);
+      }
     } else {
       ESP_LOGW(CAMPAIGN_TAG, "[%s] Channel type %d not found, skipping",
                this->config_.name.c_str(), channel_type);
