@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-13
+
+### Added — Lot 7: HA Polish + Migration Docs
+
+#### Runtime Algorithm Selection (`CalibrationAlgorithmSelect`)
+- New `algorithm_select:` config in `capturer:` block
+- Select entity to change calibration type from Home Assistant
+- Options: `none`, `linear`, `polynomial`, `piecewise`, `dfrobot_orp`
+- Changing algorithm triggers automatic revalidation of points
+- `cal_invalid` sensor updates based on new algorithm requirements
+
+#### Add/Remove Calibration Points
+- New `CalibrationAddPointButton`: Adds a calibration point with default values
+- New `CalibrationRemovePointButton`: Removes the last calibration point
+- New `CalibrationPointCountNumber`: Set exact point count (1-10)
+- Points within Capturer limits (1-10 maximum)
+
+#### Draft/Commit Calibration Workflow
+- New `draft_mode:` config in `capturer:` block (default: false)
+- When enabled, Capturer edits go to a draft set
+- Main sensor publishing continues using live/committed set
+- New `CalibrationCommitButton`: Apply draft to live and save to flash
+- New `CalibrationDiscardButton`: Revert draft to live values
+- New `DraftPendingSensor`: Binary sensor showing uncommitted draft changes
+- `CalibrationEngine` enhanced with `enable_draft_mode()`, `commit_draft()`, `discard_draft()`
+
+#### Migration Documentation (`docs/MIGRATION.md`)
+- From j5_ha_bridge options → pool_station YAML
+- From lambda-heavy pool-firmata-wifi → pool_station native
+- Entity ID stability notes
+- SENSOR-IDENTITY checklist before OTA
+
+#### Unit Tests (`tests/test_calibration_filter.py`)
+- Python tests for calibration algorithms (linear, piecewise, dfrobot_orp)
+- Tests for filter functions (median, mean, clamp, jump guard)
+- Tests for temperature compensation (Nernstian pH, linear ORP)
+- Tests for draft/commit workflow logic
+
+#### README Polish
+- Full feature matrix for Lots 0-7
+- Version pinning guidance (`@main` vs `@tag`)
+- Lot 7 feature documentation
+- Updated roadmap with Lot 8 future scope
+
+### Changed
+- `CalibrationEngine`:
+  - Separate `live_points_` and `draft_points_` vectors
+  - `set_type()` vs `set_type_runtime()` for validation callback
+  - `is_valid()` checks live points, `is_draft_valid()` checks draft
+  - `calibrate()` always uses live points
+- `__init__.py`:
+  - Added `select` to AUTO_LOAD
+  - New capturer schema options for Lot 7 components
+  - `CONF_DRAFT_MODE`, `CONF_ALGORITHM_SELECT`, etc.
+- `pool_station.h`:
+  - Forward declarations for new UI classes
+  - `set_draft_mode_enabled()` on PoolStationChannelSensor
+
+### Technical Notes
+- Draft mode is **opt-in** for backward compatibility
+- Legacy behavior (direct edits) preserved when `draft_mode: false`
+- All new UI components only created if declared in YAML
+- Validation callback notifies on algorithm/point changes
+- Draft changes don't affect published sensor values until commit
+
+---
+
 ## [0.6.0] - 2026-09-13
 
 ### Added — Lot 6: Gates & Measurement Campaigns
@@ -415,13 +482,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 3 | 0.3.0 | ✅ Filters (j5-like median, jump, clamp) | Done |
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
-| **6** | **0.6.0** | ✅ **Gates/campaigns** | **Current** |
-| 7 | 1.0.0 | HA polish, runtime algo select | Planned |
+| 6 | 0.6.0 | ✅ Gates/campaigns | Done |
+| **7** | **0.7.0** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| 8 | — | (Optional) Interference detection, EZO | Future |
 
-## Future Lots (Lot 7 candidates)
+## Future Lots (Lot 8 candidates)
 
-The following features are documented for potential inclusion in Lot 7 or later:
+The following features are documented as potential future work:
 
-- **Algorithm selection at runtime**: Select entity to change calibration type from HA
-- **Add/remove point buttons**: Dynamic point management from HA UI
-- **Draft/commit workflow**: Preview calibration changes before applying
+- **Interference/correlation detection**: Cross-channel chemistry analysis
+- **EZO (I2C Atlas Scientific) support**: Native driver for Atlas sensors

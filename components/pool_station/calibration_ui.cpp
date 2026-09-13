@@ -357,5 +357,346 @@ void CalibrationInvalidSensor::dump_config() {
   ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
 }
 
+// ============================================================================
+// Lot 7: CalibrationAlgorithmSelect
+// ============================================================================
+
+const std::vector<std::string> CalibrationAlgorithmSelect::ALGORITHM_OPTIONS = {
+    "none", "linear", "polynomial", "piecewise", "dfrobot_orp"
+};
+
+CalibrationType CalibrationAlgorithmSelect::string_to_type(const std::string &str) {
+  if (str == "none") return CAL_TYPE_NONE;
+  if (str == "linear") return CAL_TYPE_LINEAR;
+  if (str == "polynomial") return CAL_TYPE_POLYNOMIAL;
+  if (str == "piecewise") return CAL_TYPE_PIECEWISE;
+  if (str == "dfrobot_orp") return CAL_TYPE_DFROBOT_ORP;
+  if (str == "exponential") return CAL_TYPE_EXPONENTIAL;
+  if (str == "logarithmic") return CAL_TYPE_LOGARITHMIC;
+  if (str == "power") return CAL_TYPE_POWER;
+  return CAL_TYPE_NONE;
+}
+
+std::string CalibrationAlgorithmSelect::type_to_string(CalibrationType type) {
+  switch (type) {
+    case CAL_TYPE_NONE: return "none";
+    case CAL_TYPE_LINEAR: return "linear";
+    case CAL_TYPE_POLYNOMIAL: return "polynomial";
+    case CAL_TYPE_PIECEWISE: return "piecewise";
+    case CAL_TYPE_DFROBOT_ORP: return "dfrobot_orp";
+    case CAL_TYPE_EXPONENTIAL: return "exponential";
+    case CAL_TYPE_LOGARITHMIC: return "logarithmic";
+    case CAL_TYPE_POWER: return "power";
+    default: return "none";
+  }
+}
+
+void CalibrationAlgorithmSelect::setup() {
+  ESP_LOGD(UI_TAG, "Setting up CalibrationAlgorithmSelect (channel=%d)", this->channel_type_);
+  
+  // Set available options
+  this->traits.set_options(ALGORITHM_OPTIONS);
+  
+  this->update_from_calibration();
+}
+
+void CalibrationAlgorithmSelect::dump_config() {
+  LOG_SELECT("", "Calibration Algorithm Select", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
+void CalibrationAlgorithmSelect::update_from_calibration() {
+  if (this->parent_ == nullptr) return;
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  std::string type_str = type_to_string(engine->get_type());
+  this->publish_state(type_str);
+}
+
+void CalibrationAlgorithmSelect::control(const std::string &value) {
+  if (this->parent_ == nullptr) return;
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    return;
+  }
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  CalibrationType new_type = string_to_type(value);
+  engine->set_type_runtime(new_type);
+  this->publish_state(value);
+  
+  // Notify channel that calibration changed
+  channel->notify_calibration_updated();
+  
+  ESP_LOGI(UI_TAG, "Changed calibration algorithm to '%s' for channel %d", 
+           value.c_str(), this->channel_type_);
+}
+
+// ============================================================================
+// Lot 7: CalibrationAddPointButton
+// ============================================================================
+
+void CalibrationAddPointButton::dump_config() {
+  LOG_BUTTON("", "Calibration Add Point Button", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
+void CalibrationAddPointButton::press_action() {
+  if (this->parent_ == nullptr) {
+    ESP_LOGW(UI_TAG, "Add point button has no parent");
+    return;
+  }
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    return;
+  }
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  if (engine->get_point_count() >= MAX_CALIBRATION_POINTS) {
+    ESP_LOGW(UI_TAG, "Cannot add point: maximum (%d) reached", MAX_CALIBRATION_POINTS);
+    return;
+  }
+  
+  // Add a point with default values (can be edited via number entities)
+  engine->add_point(0.0f, 0.0f);
+  channel->notify_calibration_updated();
+  
+  ESP_LOGI(UI_TAG, "Added new calibration point for channel %d (total: %zu)", 
+           this->channel_type_, engine->get_point_count());
+}
+
+// ============================================================================
+// Lot 7: CalibrationRemovePointButton
+// ============================================================================
+
+void CalibrationRemovePointButton::dump_config() {
+  LOG_BUTTON("", "Calibration Remove Point Button", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
+void CalibrationRemovePointButton::press_action() {
+  if (this->parent_ == nullptr) {
+    ESP_LOGW(UI_TAG, "Remove point button has no parent");
+    return;
+  }
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    return;
+  }
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  size_t count = engine->get_point_count();
+  if (count == 0) {
+    ESP_LOGW(UI_TAG, "Cannot remove point: no points exist");
+    return;
+  }
+  
+  // Remove the last point
+  engine->remove_point(count - 1);
+  channel->notify_calibration_updated();
+  
+  ESP_LOGI(UI_TAG, "Removed last calibration point for channel %d (remaining: %zu)", 
+           this->channel_type_, engine->get_point_count());
+}
+
+// ============================================================================
+// Lot 7: CalibrationCommitButton
+// ============================================================================
+
+void CalibrationCommitButton::dump_config() {
+  LOG_BUTTON("", "Calibration Commit Button", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
+void CalibrationCommitButton::press_action() {
+  if (this->parent_ == nullptr) {
+    ESP_LOGW(UI_TAG, "Commit button has no parent");
+    return;
+  }
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(UI_TAG, "Channel %d not found for commit", this->channel_type_);
+    return;
+  }
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  if (!engine->is_draft_mode()) {
+    ESP_LOGW(UI_TAG, "Cannot commit: draft mode not enabled for channel %d", this->channel_type_);
+    return;
+  }
+  
+  // Capture water temperature before commit (Lot 5 compatibility)
+  if (this->parent_->has_water_temperature()) {
+    float water_temp = this->parent_->get_water_temperature();
+    engine->set_calibration_temperature(water_temp);
+    ESP_LOGI(UI_TAG, "Captured Tw=%.1f°C at commit time for channel %d", 
+             water_temp, this->channel_type_);
+  }
+  
+  engine->commit_draft();
+  channel->publish_calibration_temperature();
+  channel->notify_calibration_updated();
+  
+  ESP_LOGI(UI_TAG, "Committed draft calibration for channel %d", this->channel_type_);
+}
+
+// ============================================================================
+// Lot 7: CalibrationDiscardButton
+// ============================================================================
+
+void CalibrationDiscardButton::dump_config() {
+  LOG_BUTTON("", "Calibration Discard Button", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
+void CalibrationDiscardButton::press_action() {
+  if (this->parent_ == nullptr) {
+    ESP_LOGW(UI_TAG, "Discard button has no parent");
+    return;
+  }
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(UI_TAG, "Channel %d not found for discard", this->channel_type_);
+    return;
+  }
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  if (!engine->is_draft_mode()) {
+    ESP_LOGW(UI_TAG, "Cannot discard: draft mode not enabled for channel %d", this->channel_type_);
+    return;
+  }
+  
+  engine->discard_draft();
+  channel->notify_calibration_updated();
+  
+  ESP_LOGI(UI_TAG, "Discarded draft changes for channel %d", this->channel_type_);
+}
+
+// ============================================================================
+// Lot 7: CalibrationPointCountNumber
+// ============================================================================
+
+void CalibrationPointCountNumber::setup() {
+  ESP_LOGD(UI_TAG, "Setting up CalibrationPointCountNumber (channel=%d)", this->channel_type_);
+  this->update_from_calibration();
+}
+
+void CalibrationPointCountNumber::dump_config() {
+  LOG_NUMBER("", "Calibration Point Count", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
+void CalibrationPointCountNumber::update_from_calibration() {
+  if (this->parent_ == nullptr) return;
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  this->publish_state(static_cast<float>(engine->get_point_count()));
+}
+
+void CalibrationPointCountNumber::control(float value) {
+  if (this->parent_ == nullptr) return;
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    return;
+  }
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  int target_count = static_cast<int>(value);
+  if (target_count < 1) target_count = 1;
+  if (target_count > MAX_CALIBRATION_POINTS) target_count = MAX_CALIBRATION_POINTS;
+  
+  int current_count = static_cast<int>(engine->get_point_count());
+  
+  // Add or remove points to match target
+  while (current_count < target_count) {
+    engine->add_point(0.0f, 0.0f);
+    current_count++;
+  }
+  while (current_count > target_count) {
+    engine->remove_point(current_count - 1);
+    current_count--;
+  }
+  
+  this->publish_state(static_cast<float>(target_count));
+  channel->notify_calibration_updated();
+  
+  ESP_LOGI(UI_TAG, "Set calibration point count to %d for channel %d", 
+           target_count, this->channel_type_);
+}
+
+// ============================================================================
+// Lot 7: DraftPendingSensor
+// ============================================================================
+
+void DraftPendingSensor::setup() {
+  ESP_LOGD(UI_TAG, "Setting up DraftPendingSensor (channel=%d)", this->channel_type_);
+  this->publish_state(false);
+}
+
+void DraftPendingSensor::loop() {
+  // Check every 500ms
+  uint32_t now = millis();
+  if (now - this->last_check_ < 500) {
+    return;
+  }
+  this->last_check_ = now;
+  
+  if (this->parent_ == nullptr) return;
+  
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+  
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+  
+  bool has_changes = engine->has_draft_changes();
+  
+  if (has_changes != this->last_state_) {
+    this->last_state_ = has_changes;
+    this->publish_state(has_changes);
+    
+    if (has_changes) {
+      ESP_LOGD(UI_TAG, "Channel %d has uncommitted draft changes", this->channel_type_);
+    }
+  }
+}
+
+void DraftPendingSensor::dump_config() {
+  LOG_BINARY_SENSOR("", "Draft Pending Sensor", this);
+  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+}
+
 }  // namespace pool_station
 }  // namespace esphome

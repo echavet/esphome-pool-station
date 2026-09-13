@@ -7,7 +7,7 @@ Lot 2: N-point calibration with persistence, algorithms, and HA Capturer UI.
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, switch, number, button, binary_sensor
+from esphome.components import sensor, switch, number, button, binary_sensor, select
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -29,7 +29,7 @@ from esphome.core import coroutine
 CODEOWNERS = ["@echavet"]
 MULTI_CONF = False
 
-AUTO_LOAD = ["sensor", "switch", "number", "button", "binary_sensor"]
+AUTO_LOAD = ["sensor", "switch", "number", "button", "binary_sensor", "select"]
 DEPENDENCIES = []
 
 # Namespace for pool_station C++ code
@@ -138,6 +138,37 @@ CampaignActionType = pool_station_ns.enum("CampaignActionType")
 ACTION_SWITCH_ON = CampaignActionType.ACTION_SWITCH_ON
 ACTION_SWITCH_OFF = CampaignActionType.ACTION_SWITCH_OFF
 
+# Lot 7: Runtime algorithm select
+CalibrationAlgorithmSelect = pool_station_ns.class_(
+    "CalibrationAlgorithmSelect", select.Select, cg.Component
+)
+
+# Lot 7: Add/Remove point buttons
+CalibrationAddPointButton = pool_station_ns.class_(
+    "CalibrationAddPointButton", button.Button, cg.Component
+)
+CalibrationRemovePointButton = pool_station_ns.class_(
+    "CalibrationRemovePointButton", button.Button, cg.Component
+)
+
+# Lot 7: Draft/Commit buttons
+CalibrationCommitButton = pool_station_ns.class_(
+    "CalibrationCommitButton", button.Button, cg.Component
+)
+CalibrationDiscardButton = pool_station_ns.class_(
+    "CalibrationDiscardButton", button.Button, cg.Component
+)
+
+# Lot 7: Point count number
+CalibrationPointCountNumber = pool_station_ns.class_(
+    "CalibrationPointCountNumber", number.Number, cg.Component
+)
+
+# Lot 7: Draft pending binary sensor
+DraftPendingSensor = pool_station_ns.class_(
+    "DraftPendingSensor", binary_sensor.BinarySensor, cg.Component
+)
+
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
 CONF_CALIBRATION_MODE = "calibration_mode"
@@ -238,6 +269,16 @@ CONF_POINT_NUMBERS = "point_numbers"
 CONF_SAVE_BUTTON = "save_button"
 CONF_MID_NUMBER = "mid_number"
 CONF_OFFSET_NUMBER = "offset_number"
+
+# Lot 7: Advanced capturer UI configuration
+CONF_ALGORITHM_SELECT = "algorithm_select"
+CONF_ADD_POINT_BUTTON = "add_point_button"
+CONF_REMOVE_POINT_BUTTON = "remove_point_button"
+CONF_COMMIT_BUTTON = "commit_button"
+CONF_DISCARD_BUTTON = "discard_button"
+CONF_POINT_COUNT_NUMBER = "point_count_number"
+CONF_DRAFT_PENDING = "draft_pending"
+CONF_DRAFT_MODE = "draft_mode"
 
 # Channel types enum (must match C++)
 CHANNEL_TYPE_PRESSURE = 0
@@ -427,7 +468,18 @@ def diagnostics_schema(channel_type):
 
 
 def capturer_schema(channel_type):
-    """Schema for capturer UI configuration."""
+    """Schema for capturer UI configuration.
+    
+    Lot 7 additions:
+    - algorithm_select: Select entity to change calibration type at runtime
+    - add_point_button: Button to add a new calibration point
+    - remove_point_button: Button to remove the last calibration point
+    - point_count_number: Number entity to control point count
+    - draft_mode: Enable draft/commit workflow (default: false for backward compat)
+    - commit_button: Button to commit draft changes to live
+    - discard_button: Button to discard draft changes
+    - draft_pending: Binary sensor showing uncommitted draft changes
+    """
     return cv.Schema({
         cv.Optional(CONF_POINT_COUNT, default=3): cv.int_range(min=1, max=10),
         cv.Optional(CONF_CAPTURE_BUTTONS, default=True): cv.boolean,
@@ -436,6 +488,46 @@ def capturer_schema(channel_type):
         # DFRobot specific UI (only for ORP)
         cv.Optional(CONF_MID_NUMBER, default=False): cv.boolean,
         cv.Optional(CONF_OFFSET_NUMBER, default=False): cv.boolean,
+        # Lot 7: Runtime algorithm selection
+        cv.Optional(CONF_ALGORITHM_SELECT): select.select_schema(
+            CalibrationAlgorithmSelect,
+            icon="mdi:function-variant",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        # Lot 7: Add/remove point buttons
+        cv.Optional(CONF_ADD_POINT_BUTTON): button.button_schema(
+            CalibrationAddPointButton,
+            icon="mdi:plus-circle",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_REMOVE_POINT_BUTTON): button.button_schema(
+            CalibrationRemovePointButton,
+            icon="mdi:minus-circle",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        # Lot 7: Point count number (alternative to add/remove buttons)
+        cv.Optional(CONF_POINT_COUNT_NUMBER): number.number_schema(
+            CalibrationPointCountNumber,
+            icon="mdi:counter",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        # Lot 7: Draft/Commit workflow
+        cv.Optional(CONF_DRAFT_MODE, default=False): cv.boolean,
+        cv.Optional(CONF_COMMIT_BUTTON): button.button_schema(
+            CalibrationCommitButton,
+            icon="mdi:check-circle",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_DISCARD_BUTTON): button.button_schema(
+            CalibrationDiscardButton,
+            icon="mdi:close-circle",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_DRAFT_PENDING): binary_sensor.binary_sensor_schema(
+            DraftPendingSensor,
+            icon="mdi:alert-circle-outline",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
     })
 
 
@@ -897,6 +989,82 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         cg.add(offset_var.set_parent(parent_var))
         cg.add(offset_var.set_channel_type(channel_type))
         cg.add(parent_var.register_dfrobot_offset_number(offset_var, channel_type))
+    
+    # =========================================================================
+    # Lot 7: Advanced Capturer UI
+    # =========================================================================
+    
+    # Algorithm select
+    if CONF_ALGORITHM_SELECT in capturer_conf:
+        algo_conf = capturer_conf[CONF_ALGORITHM_SELECT]
+        algo_var = cg.new_Pvariable(algo_conf[CONF_ID])
+        await cg.register_component(algo_var, algo_conf)
+        await select.register_select(algo_var, algo_conf, options=[])
+        cg.add(algo_var.set_parent(parent_var))
+        cg.add(algo_var.set_channel_type(channel_type))
+    
+    # Add point button
+    if CONF_ADD_POINT_BUTTON in capturer_conf:
+        add_conf = capturer_conf[CONF_ADD_POINT_BUTTON]
+        add_var = cg.new_Pvariable(add_conf[CONF_ID])
+        await cg.register_component(add_var, add_conf)
+        await button.register_button(add_var, add_conf)
+        cg.add(add_var.set_parent(parent_var))
+        cg.add(add_var.set_channel_type(channel_type))
+    
+    # Remove point button
+    if CONF_REMOVE_POINT_BUTTON in capturer_conf:
+        remove_conf = capturer_conf[CONF_REMOVE_POINT_BUTTON]
+        remove_var = cg.new_Pvariable(remove_conf[CONF_ID])
+        await cg.register_component(remove_var, remove_conf)
+        await button.register_button(remove_var, remove_conf)
+        cg.add(remove_var.set_parent(parent_var))
+        cg.add(remove_var.set_channel_type(channel_type))
+    
+    # Point count number
+    if CONF_POINT_COUNT_NUMBER in capturer_conf:
+        count_conf = capturer_conf[CONF_POINT_COUNT_NUMBER]
+        count_var = cg.new_Pvariable(count_conf[CONF_ID])
+        await cg.register_component(count_var, count_conf)
+        await number.register_number(
+            count_var, count_conf,
+            min_value=1.0,
+            max_value=10.0,
+            step=1.0,
+        )
+        cg.add(count_var.set_parent(parent_var))
+        cg.add(count_var.set_channel_type(channel_type))
+    
+    # Draft mode configuration
+    draft_mode_enabled = capturer_conf.get(CONF_DRAFT_MODE, False)
+    cg.add(channel_var.set_draft_mode_enabled(draft_mode_enabled))
+    
+    # Commit button (only if draft mode enabled)
+    if CONF_COMMIT_BUTTON in capturer_conf:
+        commit_conf = capturer_conf[CONF_COMMIT_BUTTON]
+        commit_var = cg.new_Pvariable(commit_conf[CONF_ID])
+        await cg.register_component(commit_var, commit_conf)
+        await button.register_button(commit_var, commit_conf)
+        cg.add(commit_var.set_parent(parent_var))
+        cg.add(commit_var.set_channel_type(channel_type))
+    
+    # Discard button (only if draft mode enabled)
+    if CONF_DISCARD_BUTTON in capturer_conf:
+        discard_conf = capturer_conf[CONF_DISCARD_BUTTON]
+        discard_var = cg.new_Pvariable(discard_conf[CONF_ID])
+        await cg.register_component(discard_var, discard_conf)
+        await button.register_button(discard_var, discard_conf)
+        cg.add(discard_var.set_parent(parent_var))
+        cg.add(discard_var.set_channel_type(channel_type))
+    
+    # Draft pending sensor
+    if CONF_DRAFT_PENDING in capturer_conf:
+        pending_conf = capturer_conf[CONF_DRAFT_PENDING]
+        pending_var = cg.new_Pvariable(pending_conf[CONF_ID])
+        await cg.register_component(pending_var, pending_conf)
+        await binary_sensor.register_binary_sensor(pending_var, pending_conf)
+        cg.add(pending_var.set_parent(parent_var))
+        cg.add(pending_var.set_channel_type(channel_type))
 
 
 async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):

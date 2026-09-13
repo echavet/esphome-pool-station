@@ -64,6 +64,15 @@ class CalibrationCaptureButton;
 class CalibrationSaveButton;
 class CalibrationInvalidSensor;
 
+// Lot 7: New UI forward declarations
+class CalibrationAlgorithmSelect;
+class CalibrationAddPointButton;
+class CalibrationRemovePointButton;
+class CalibrationCommitButton;
+class CalibrationDiscardButton;
+class CalibrationPointCountNumber;
+class DraftPendingSensor;
+
 // Diagnostic flag forward declarations (Lot 4)
 class DiagnosticNoisyFlag;
 class DiagnosticStuckFlag;
@@ -282,6 +291,9 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void set_dfrobot_offset_mv(float offset);
   void add_calibration_point(float x, float y);
   void set_preferences_key(uint32_t key);
+  
+  // Lot 7: Draft mode configuration
+  void set_draft_mode_enabled(bool enabled);
 
   // Accessors
   ChannelType get_channel_type() const { return this->channel_type_; }

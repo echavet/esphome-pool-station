@@ -7,72 +7,56 @@
 
 **pool_station** is an ESPHome external component designed to transform an ESP32 into a comprehensive pool monitoring station. This is **NOT** a simple DFRobot driver or vendor wrapper — it's a sophisticated calibration, diagnostics, and intelligent sampling platform.
 
-## Vision
+## Features
 
-- **Rich N-point calibration** with multiple algorithms: linear, polynomial, piecewise, dfrobot_orp (SEN0165-like mid/offset)
-- **Capturer UI**: Calibration workflow directly from Home Assistant with capture buttons and number entities
-- **Calibration persistence**: Survives reboots via ESPHome preferences (flash storage)
-- **Real-time diagnostics**: noise detection, jump detection, drift monitoring (coming in Lot 4)
-- **Gated/campaign sampling**: e.g., filtration OFF for 60s then measure pH/ORP (coming in Lot 6)
-- **Water temperature compensation**: calibration and measurements compensated for Tw (coming in Lot 5)
+- **Rich N-point calibration** with multiple algorithms: linear, polynomial, piecewise, dfrobot_orp
+- **Capturer UI**: Calibration workflow directly from Home Assistant
+- **Draft/Commit workflow**: Preview changes before applying (Lot 7)
+- **Runtime algorithm selection**: Change calibration type without reflashing (Lot 7)
+- **Calibration persistence**: Survives reboots via ESPHome preferences
+- **Real-time diagnostics**: noise detection, stuck detection, out-of-range flags
+- **Water temperature compensation**: Nernstian model for pH, linear model for ORP
 - **Compose ESPHome sensors**: uses native `ads1115`/`dallas`/`gpio` — does NOT reimplement drivers
 - **Stable entity IDs**: anti-swap protection by physical address (see [SENSOR-IDENTITY.md](docs/SENSOR-IDENTITY.md))
-- **Brand agnostic**: works with any analog pH/ORP probe, not locked to DFRobot/Atlas/etc.
+- **Brand agnostic**: works with any analog pH/ORP probe
 
-Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.com/echavet/pool-firmata-wifi) (ESP32-S3 + ADS1115: A0 pressure, A2 pH, A3 ORP).
+Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.com/echavet/pool-firmata-wifi).
 
-## Current Status
+## Feature Matrix
 
-**Lot 6** — Gates & Measurement Campaigns:
-- ✅ Per-channel `gate:` configuration to block sampling unless conditions met
-- ✅ Gate conditions: binary_sensor state, switch state, sensor threshold
-- ✅ `gate_blocked` binary_sensor exposes gate status to HA
-- ✅ Measurement campaigns with state machine: idle → preparing → waiting → sampling → restoring → idle
-- ✅ Campaign `prepare:` actions to control switches (e.g., turn filtration OFF)
-- ✅ Campaign `delay:` waits before sampling (e.g., 60s for water to settle)
-- ✅ Burst sampling: multiple samples per channel with configurable delay
-- ✅ `restore: true` returns actuators to prior state after sampling
-- ✅ Safety: `timeout:` max duration with automatic abort + restore
-- ✅ HA UI: start/abort buttons, `campaign_running` binary_sensor
-- ✅ Result sensors: capture last campaign values per channel
-- ✅ State transitions logged at INFO level with clear markers
+| Feature | Lot | Status | Description |
+|---------|-----|--------|-------------|
+| **Skeleton & Docs** | 0 | ✅ Done | Component structure, CDC, SENSOR-IDENTITY |
+| **ADS1115 Binding** | 1 | ✅ Done | Source sensors, raw values, calibration mode switch |
+| **N-Point Calibration** | 2 | ✅ Done | Multiple algorithms, Capturer UI, persistence |
+| **Filters** | 3 | ✅ Done | Median, jump guard, clamp, calibration bypass |
+| **Diagnostics** | 4 | ✅ Done | Noise/stuck/range flags, stats sensors, logging |
+| **Temperature Compensation** | 5 | ✅ Done | Nernstian pH model, optional ORP linear model |
+| **Gates/Campaigns** | 6 | ✅ Done | Conditional sampling, measurement campaigns |
+| **HA Polish** | 7 | ✅ Done | Runtime algo select, add/remove points, draft/commit |
+| **Interference Detection** | 8 | 🔮 Future | Cross-channel correlation (optional) |
 
-**Lot 5** — Water Temperature Reference + Compensation:
-- ✅ Top-level `water_temperature: sensor_id` binding to Dallas probe
-- ✅ Per-channel `temperature_compensation:` block for pH and ORP
-- ✅ pH compensation: Nernstian slope model with documented formula
-- ✅ ORP compensation: Optional linear model (disabled by default)
-- ✅ Runtime switch entity to enable/disable compensation
-- ✅ Calibration metadata: Tw stored at calibration save time
-- ✅ `calibration_temp_sensor` diagnostic shows Tw at last calibration
-- ✅ Pipeline order: raw → median → calibrate → temp_comp → guards → publish
+## Current Status — Lot 7
 
-**Lot 4** — Diagnostics (noise / drift / flags):
-- ✅ Sliding window statistics: mean, σ (stddev), peak-to-peak
-- ✅ Optional diagnostic sensors (only created if declared in YAML)
-- ✅ Diagnostic flags as binary_sensors: `noisy`, `stuck`, `out_of_range`
-- ✅ Configurable thresholds: `noise_window`, `noise_warn_ptp`, `noise_warn_sigma`, `stuck_timeout`
-- ✅ Structured logging with tag `pool_station` on abnormal events (rate-limited)
-- ✅ Calibration mode: diagnostics run but avoid spamming logs
-- ✅ Pressure-friendly: enable diagnostics without heavy filters
+**Lot 7** — HA Polish + Migration Docs:
+- ✅ **Runtime algorithm select**: Change calibration type from HA without reflash
+- ✅ **Add/remove calibration points**: Dynamic point management from UI
+- ✅ **Point count number**: Resize calibration points (1-10)
+- ✅ **Draft/Commit workflow**: Edit draft, preview, then commit or discard
+- ✅ **Draft pending sensor**: Shows when uncommitted changes exist
+- ✅ **Migration documentation**: From j5_ha_bridge and pool-firmata-wifi
+- ✅ **Unit tests**: Python tests for calibration and filter algorithms
 
-**Lot 3** — Filters & Companion Publication:
-- ✅ Per-channel filters (median window, jump guard, min/max clamp)
-- ✅ `calibrated_sensor` companion entity (pre-guard diagnostic)
-- ✅ Pressure defaults: filters OFF (fast response)
-- ✅ Calibration mode bypasses filters (~1s raw response)
-- ✅ Pipeline: raw → median → calibrate → clamp → jump guard → publish
+**Previous Lots**:
+- **Lot 6**: Gates and measurement campaigns
+- **Lot 5**: Water temperature compensation (Nernstian pH, linear ORP)
+- **Lot 4**: Diagnostics (noise σ/ptp, stuck, out_of_range flags)
+- **Lot 3**: Filters (median window, jump guard, clamp)
+- **Lot 2**: N-point calibration, Capturer UI, persistence
+- **Lot 1**: ADS1115 binding, raw sensors, calibration mode
+- **Lot 0**: Component skeleton, documentation
 
-**Lot 2** — N-Point Calibration & Capturer UI:
-- ✅ N-point calibration (1 to 10 points per channel)
-- ✅ Multiple algorithms: linear, polynomial, piecewise, dfrobot_orp
-- ✅ Capturer UI: capture buttons, x/y number entities, save button
-- ✅ DFRobot ORP: mid_mv/offset_mv number entities for SEN0165-like calibration
-- ✅ Calibration persistence to flash (survives reboots)
-- ✅ `cal_invalid` binary sensor when calibration is insufficient
-- ✅ YAML seed points with runtime override
-
-See [Roadmap](#roadmap) for upcoming lots.
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ## Installation
 
@@ -84,6 +68,24 @@ external_components:
     components: [pool_station]
     refresh: 1d
 ```
+
+### Version Pinning
+
+For production stability, pin to a specific tag instead of `@main`:
+
+```yaml
+external_components:
+  # Pin to a release tag for stability
+  - source: github://echavet/esphome-pool-station@v0.7.0
+    components: [pool_station]
+    refresh: 0s  # No refresh for tagged versions
+```
+
+| Reference | Use Case | Stability |
+|-----------|----------|-----------|
+| `@main` | Development, testing latest features | May break |
+| `@v0.7.0` | Production, stable release | Stable |
+| `@commit-sha` | Specific commit for debugging | Fixed |
 
 ## Quick Start (Lot 2)
 
@@ -423,137 +425,89 @@ Use calibration mode when:
 
 ## Roadmap
 
-| Lot | Content | Status |
-|-----|---------|--------|
-| 0 | Skeleton, docs, sensor stub | ✅ Done |
-| 1 | ADS1115 binding, raw values, calibration mode | ✅ Done |
-| 2 | N-point calibration, Capturer UI, persistence | ✅ Done |
-| 3 | j5-like filters (median, max_jump, streak, clamp) | ✅ Done |
-| 4 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
-| 5 | Water temperature compensation (Tw) | ✅ Done |
-| **6** | **Gates/campaigns (conditional sampling)** | ✅ **Current** |
-| 7 | HA polish, runtime algo select, services | 📋 Planned |
-| 8 | (Optional) Interference detection, EZO support | 🔮 Future |
+| Lot | Version | Content | Status |
+|-----|---------|---------|--------|
+| 0 | 0.0.1 | Skeleton, docs, sensor stub | ✅ Done |
+| 1 | 0.1.0 | ADS1115 binding, raw values, calibration mode | ✅ Done |
+| 2 | 0.2.0 | N-point calibration, Capturer UI, persistence | ✅ Done |
+| 3 | 0.3.0 | j5-like filters (median, max_jump, streak, clamp) | ✅ Done |
+| 4 | 0.4.0 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
+| 5 | 0.5.0 | Water temperature compensation (Tw) | ✅ Done |
+| 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
+| **7** | **0.7.0** | **HA polish, runtime algo select, draft/commit** | ✅ **Current** |
+| 8 | — | (Optional) Interference detection, EZO support | 🔮 Future |
 
-## Lot 6 — What's New
+### Lot 8 — Future / Out of Scope
 
-### Continuous Gates
+The following features are documented as potential future work but are **not planned** for implementation:
 
-Gates block sampling/publishing unless all configured conditions are met. Use cases:
-- Sample pH only when water is flowing (flow_switch binary_sensor ON)
-- Block pressure reading when pump is OFF (switch state check)
-- Require minimum pressure for valid readings (sensor threshold)
+- **Interference/correlation detection**: Cross-channel chemistry analysis
+- **EZO (I2C Atlas Scientific) support**: Native Atlas driver integration
+- **Zelia/Zodiac protocols**: Proprietary closed protocols
 
-```yaml
-channels:
-  ph:
-    # Gate blocks sampling when flow is not detected
-    gate:
-      conditions:
-        - name: "flow_active"
-          binary_sensor_id: flow_switch
-          state: true  # Sample only when flow is detected
-        - sensor_id: pressure
-          operator: ">="
-          threshold: 0.5  # Also require minimum pressure
-      gate_blocked:
-        name: "Pool pH Gate Blocked"
-```
+## Lot 7 — What's New
 
-Gate conditions support:
-- **binary_sensor**: `binary_sensor_id` with `state: true/false`
-- **switch**: `switch_id` with `state: true/false`
-- **sensor threshold**: `sensor_id` with `operator` (>, >=, <, <=, ==) and `threshold`
+### Runtime Algorithm Selection
 
-> **Calibration Mode**: Gates are bypassed in calibration mode so you can calibrate regardless of conditions.
-
-### Measurement Campaigns
-
-Campaigns are one-shot measurement sequences with actuator control. Eric's canonical scenario:
-1. Stop filtration pump
-2. Wait 60 seconds for water to settle
-3. Take burst samples of pH and ORP
-4. Restore filtration to prior state
+Change calibration algorithm from Home Assistant without reflashing:
 
 ```yaml
-pool_station:
-  campaigns:
-    - name: "pH/ORP Quiescent"
-      # Prepare: turn off filtration before sampling
-      prepare:
-        - switch_id: relay_filtration
-          state: false
-      
-      # Wait for water to settle
-      delay: 60s
-      
-      # Channels to sample
-      sample_channels: [ph, orp]
-      
-      # Burst: take 3 samples, 500ms apart
-      burst_samples: 3
-      burst_delay: 500ms
-      
-      # Restore to prior state after sampling
-      restore: true
-      
-      # Safety timeout
-      timeout: 120s
-      
-      # Home Assistant UI
-      start_button:
-        name: "Start Quiescent Measurement"
-      abort_button:
-        name: "Abort Quiescent Measurement"
-      running:
-        name: "Quiescent Measurement Running"
-      
-      # Optional result sensors
-      result_sensors:
-        ph:
-          name: "Quiescent pH"
-        orp:
-          name: "Quiescent ORP"
+capturer:
+  algorithm_select:
+    name: "pH Algorithm"
 ```
 
-### Campaign State Machine
+Creates a select entity with options: `none`, `linear`, `polynomial`, `piecewise`, `dfrobot_orp`.
 
+**Use case**: Switch from `linear` to `piecewise` after adding more calibration points.
+
+### Add/Remove Calibration Points
+
+Dynamic point management from the UI:
+
+```yaml
+capturer:
+  add_point_button:
+    name: "pH Add Point"
+  remove_point_button:
+    name: "pH Remove Point"
+  point_count_number:
+    name: "pH Point Count"
 ```
-IDLE → PREPARING → WAITING → SAMPLING → RESTORING → IDLE
+
+- **add_point_button**: Adds a new calibration point (x=0, y=0)
+- **remove_point_button**: Removes the last point
+- **point_count_number**: Resize to exact count (1-10)
+
+### Draft/Commit Workflow
+
+Preview calibration changes before applying them:
+
+```yaml
+capturer:
+  draft_mode: true
+  commit_button:
+    name: "pH Commit Calibration"
+  discard_button:
+    name: "pH Discard Changes"
+  draft_pending:
+    name: "pH Draft Pending"
 ```
 
-State transitions are logged at INFO level with clear markers:
+**Workflow**:
+1. Enable `draft_mode: true` in YAML
+2. Edit points using Capturer UI (changes go to draft)
+3. Main sensor continues using live/committed calibration
+4. Press **Commit** to apply draft → live (and save to flash)
+5. Or press **Discard** to revert draft to live
 
-```
-[pool_station.campaign] ========================================
-[pool_station.campaign] Starting campaign: pH/ORP Quiescent
-[pool_station.campaign] ========================================
-[pool_station.campaign] [pH/ORP Quiescent] State: IDLE → PREPARING
-[pool_station.campaign] Executing action: relay_filtration → OFF
-[pool_station.campaign] [pH/ORP Quiescent] State: PREPARING → WAITING
-...
-[pool_station.campaign] Campaign 'pH/ORP Quiescent' COMPLETE (duration: 63500 ms)
-```
+**draft_pending** binary sensor shows `ON` when uncommitted changes exist.
 
-### Campaign Safety Features
+### Backward Compatibility
 
-1. **Timeout**: Automatic abort + restore after configurable timeout
-2. **Restore**: Actuators return to prior state even on abort/timeout
-3. **Refuse Start**: Campaign won't start if already running
-4. **Safety Gate**: Optional gate that must be clear to start (future)
-
-### How to Run Filtration-Off Sample (Home Assistant)
-
-1. **Verify Flow**: Ensure "Flow Detector" shows ON (water flowing)
-2. **Check Sensors**: Verify pH and ORP sensors are reading normally
-3. **Start Campaign**: Press "Start Quiescent Measurement" button
-4. **Monitor State**: Watch "Quiescent Measurement Running" binary sensor
-   - Campaign turns filtration OFF
-   - Waits 60 seconds
-   - Takes 3 burst samples of pH and ORP
-   - Restores filtration to prior state
-5. **View Results**: Check "Quiescent pH" and "Quiescent ORP" sensors
-6. **Compare**: Compare quiescent values with normal readings
+- `draft_mode: false` (default): Legacy behavior, edits apply immediately
+- All new UI components are **opt-in** (only created if declared in YAML)
+- Existing configurations work without modification
 
 ---
 
