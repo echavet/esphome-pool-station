@@ -4,8 +4,10 @@
 #include "esphome/core/log.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "calibration_engine.h"
 #include "channel_filter.h"
+#include "channel_diagnostics.h"
 #include <vector>
 #include <map>
 #include <functional>
@@ -58,6 +60,11 @@ class DFRobotOffsetNumber;
 class CalibrationCaptureButton;
 class CalibrationSaveButton;
 class CalibrationInvalidSensor;
+
+// Diagnostic flag forward declarations (Lot 4)
+class DiagnosticNoisyFlag;
+class DiagnosticStuckFlag;
+class DiagnosticOutOfRangeFlag;
 
 /**
  * Main pool_station component.
@@ -192,6 +199,32 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void set_value_min(float min);
   void set_value_max(float max);
 
+  // Diagnostics configuration (Lot 4)
+  void set_diagnostics_enabled(bool enabled);
+  void set_noise_window(uint8_t size);
+  void set_noise_warn_ptp(float threshold);
+  void set_noise_warn_sigma(float threshold);
+  void set_stuck_timeout_ms(uint32_t timeout);
+  void set_stuck_threshold(float threshold);
+  void set_diagnostics_range_min(float min);
+  void set_diagnostics_range_max(float max);
+  void set_log_rate_limit_ms(uint32_t rate);
+  
+  // Diagnostic sensor setters (Lot 4)
+  void set_diag_mean_sensor(sensor::Sensor *sensor) { this->diag_mean_sensor_ = sensor; }
+  void set_diag_sigma_sensor(sensor::Sensor *sensor) { this->diag_sigma_sensor_ = sensor; }
+  void set_diag_ptp_sensor(sensor::Sensor *sensor) { this->diag_ptp_sensor_ = sensor; }
+  
+  // Diagnostic flag setters (Lot 4)
+  void set_diag_noisy_flag(DiagnosticNoisyFlag *flag) { this->diag_noisy_flag_ = flag; }
+  void set_diag_stuck_flag(DiagnosticStuckFlag *flag) { this->diag_stuck_flag_ = flag; }
+  void set_diag_out_of_range_flag(DiagnosticOutOfRangeFlag *flag) { this->diag_out_of_range_flag_ = flag; }
+  
+  // Diagnostics accessors (Lot 4)
+  const DiagnosticsStats &get_diagnostics_stats() const;
+  const DiagnosticsFlags &get_diagnostics_flags() const;
+  bool is_diagnostics_enabled() const { return this->diagnostics_enabled_; }
+
   // Calibration configuration
   void set_calibration_type(uint8_t type);
   void set_polynomial_order(uint8_t order);
@@ -238,6 +271,21 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   SlidingWindow raw_window_;
   JumpGuard jump_guard_;
   
+  // Diagnostics configuration and state (Lot 4)
+  bool diagnostics_enabled_{false};
+  DiagnosticsConfig diagnostics_config_;
+  ChannelDiagnostics diagnostics_;
+  
+  // Diagnostic sensors (Lot 4, opt-in)
+  sensor::Sensor *diag_mean_sensor_{nullptr};
+  sensor::Sensor *diag_sigma_sensor_{nullptr};
+  sensor::Sensor *diag_ptp_sensor_{nullptr};
+  
+  // Diagnostic flags (Lot 4, opt-in)
+  DiagnosticNoisyFlag *diag_noisy_flag_{nullptr};
+  DiagnosticStuckFlag *diag_stuck_flag_{nullptr};
+  DiagnosticOutOfRangeFlag *diag_out_of_range_flag_{nullptr};
+  
   // Callback ID for source sensor subscription
   optional<CallbackManager<void(float)>::CancelToken> source_callback_;
 };
@@ -273,6 +321,55 @@ class PoolStationSensor : public sensor::Sensor, public Component {
   
   float last_raw_value_{NAN};
   float last_calibrated_value_{NAN};
+};
+
+/**
+ * Diagnostic flag binary sensors (Lot 4).
+ * Expose diagnostic flags as Home Assistant binary_sensor entities.
+ */
+class DiagnosticNoisyFlag : public binary_sensor::BinarySensor, public Component {
+ public:
+  DiagnosticNoisyFlag() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
+class DiagnosticStuckFlag : public binary_sensor::BinarySensor, public Component {
+ public:
+  DiagnosticStuckFlag() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
+class DiagnosticOutOfRangeFlag : public binary_sensor::BinarySensor, public Component {
+ public:
+  DiagnosticOutOfRangeFlag() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
 };
 
 }  // namespace pool_station

@@ -63,12 +63,14 @@
 
 ### F-DIAG : Diagnostics
 
-| ID | Exigence | Lot |
-|----|----------|-----|
-| F-DIAG-01 | Détection bruit excessif (σ sur fenêtre) | 4 |
-| F-DIAG-02 | Détection sauts (|Δ| > seuil) | 4 |
-| F-DIAG-03 | Détection dérive (trend sur durée) | 4 |
-| F-DIAG-04 | Flags exposés comme attributs sensor | 4 |
+| ID | Exigence | Lot | Status |
+|----|----------|-----|--------|
+| F-DIAG-01 | Détection bruit excessif (σ sur fenêtre) | 4 | ✅ Done |
+| F-DIAG-02 | Détection sauts (|Δ| > seuil) | 4 | ✅ Done (via jump_magnitude) |
+| F-DIAG-03 | Détection dérive (stuck detection) | 4 | ✅ Done |
+| F-DIAG-04 | Flags exposés comme binary_sensors | 4 | ✅ Done |
+| F-DIAG-05 | Stats exposés comme sensors (mean, σ, ptp) | 4 | ✅ Done |
+| F-DIAG-06 | Logging structuré avec rate-limiting | 4 | ✅ Done |
 
 ### F-GATE : Échantillonnage conditionné (Gates/Campaigns)
 
@@ -155,8 +157,8 @@
 | 0 | Squelette, docs, sensor stub | ✅ Done |
 | 1 | ADS1115 binding, raw values, cal mode switch | ✅ Done |
 | 2 | N-point calibration, Capturer, persistence | ✅ Done |
-| **3** | **Filters (j5-like median, jump, clamp)** | ✅ **Current** |
-| 4 | Diagnostics (noise σ/ptp, jumps, drift) | Planned |
+| 3 | Filters (j5-like median, jump, clamp) | ✅ Done |
+| **4** | **Diagnostics (noise σ/ptp, stuck, flags)** | ✅ **Current** |
 | 5 | Water temp compensation (Tw) | Planned |
 | 6 | Gates/campaigns | Planned |
 | 7 | HA polish, runtime algo select, services | Planned |

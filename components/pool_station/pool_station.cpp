@@ -226,6 +226,17 @@ void PoolStationChannelSensor::setup() {
              this->calibration_.is_valid() ? "YES" : "NO",
              this->calibration_.get_point_count());
   }
+  
+  // Initialize diagnostics (Lot 4)
+  if (this->diagnostics_enabled_) {
+    this->diagnostics_.set_config(this->diagnostics_config_);
+    ESP_LOGD(TAG, "Channel %s diagnostics: window=%d, ptp_warn=%.3f, sigma_warn=%.3f, stuck=%ums",
+             this->get_channel_type_name(),
+             this->diagnostics_config_.noise_window,
+             this->diagnostics_config_.noise_warn_ptp,
+             this->diagnostics_config_.noise_warn_sigma,
+             this->diagnostics_config_.stuck_timeout_ms);
+  }
 }
 
 void PoolStationChannelSensor::loop() {
@@ -262,6 +273,45 @@ void PoolStationChannelSensor::dump_config() {
   
   // Dump calibration config
   this->calibration_.dump_config();
+  
+  // Dump diagnostics config (Lot 4)
+  if (this->diagnostics_enabled_) {
+    ESP_LOGCONFIG(TAG, "  Diagnostics:");
+    ESP_LOGCONFIG(TAG, "    noise_window: %d", this->diagnostics_config_.noise_window);
+    ESP_LOGCONFIG(TAG, "    noise_warn_ptp: %.4f%s", 
+                  this->diagnostics_config_.noise_warn_ptp,
+                  this->diagnostics_config_.noise_warn_ptp > 0 ? "" : " (off)");
+    ESP_LOGCONFIG(TAG, "    noise_warn_sigma: %.4f%s", 
+                  this->diagnostics_config_.noise_warn_sigma,
+                  this->diagnostics_config_.noise_warn_sigma > 0 ? "" : " (off)");
+    ESP_LOGCONFIG(TAG, "    stuck_timeout: %u ms%s", 
+                  this->diagnostics_config_.stuck_timeout_ms,
+                  this->diagnostics_config_.stuck_timeout_ms > 0 ? "" : " (off)");
+    if (!std::isnan(this->diagnostics_config_.range_min)) {
+      ESP_LOGCONFIG(TAG, "    range_min: %.3f", this->diagnostics_config_.range_min);
+    }
+    if (!std::isnan(this->diagnostics_config_.range_max)) {
+      ESP_LOGCONFIG(TAG, "    range_max: %.3f", this->diagnostics_config_.range_max);
+    }
+    if (this->diag_mean_sensor_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    mean_sensor: configured");
+    }
+    if (this->diag_sigma_sensor_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    sigma_sensor: configured");
+    }
+    if (this->diag_ptp_sensor_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    ptp_sensor: configured");
+    }
+    if (this->diag_noisy_flag_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    noisy_flag: configured");
+    }
+    if (this->diag_stuck_flag_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    stuck_flag: configured");
+    }
+    if (this->diag_out_of_range_flag_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    out_of_range_flag: configured");
+    }
+  }
 }
 
 const char *PoolStationChannelSensor::get_channel_type_name() const {
@@ -319,6 +369,54 @@ void PoolStationChannelSensor::set_value_min(float min) {
 
 void PoolStationChannelSensor::set_value_max(float max) {
   this->filter_config_.value_max = max;
+}
+
+// ============================================================================
+// Diagnostics configuration setters (Lot 4)
+// ============================================================================
+
+void PoolStationChannelSensor::set_diagnostics_enabled(bool enabled) {
+  this->diagnostics_enabled_ = enabled;
+}
+
+void PoolStationChannelSensor::set_noise_window(uint8_t size) {
+  this->diagnostics_config_.noise_window = size;
+}
+
+void PoolStationChannelSensor::set_noise_warn_ptp(float threshold) {
+  this->diagnostics_config_.noise_warn_ptp = threshold;
+}
+
+void PoolStationChannelSensor::set_noise_warn_sigma(float threshold) {
+  this->diagnostics_config_.noise_warn_sigma = threshold;
+}
+
+void PoolStationChannelSensor::set_stuck_timeout_ms(uint32_t timeout) {
+  this->diagnostics_config_.stuck_timeout_ms = timeout;
+}
+
+void PoolStationChannelSensor::set_stuck_threshold(float threshold) {
+  this->diagnostics_config_.stuck_threshold = threshold;
+}
+
+void PoolStationChannelSensor::set_diagnostics_range_min(float min) {
+  this->diagnostics_config_.range_min = min;
+}
+
+void PoolStationChannelSensor::set_diagnostics_range_max(float max) {
+  this->diagnostics_config_.range_max = max;
+}
+
+void PoolStationChannelSensor::set_log_rate_limit_ms(uint32_t rate) {
+  this->diagnostics_config_.log_rate_limit_ms = rate;
+}
+
+const DiagnosticsStats &PoolStationChannelSensor::get_diagnostics_stats() const {
+  return this->diagnostics_.get_stats();
+}
+
+const DiagnosticsFlags &PoolStationChannelSensor::get_diagnostics_flags() const {
+  return this->diagnostics_.get_flags();
 }
 
 void PoolStationChannelSensor::notify_calibration_updated() {
@@ -434,6 +532,59 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   // Step 8: Publish final guarded value
   this->publish_state(guarded);
   
+  // =========================================================================
+  // DIAGNOSTICS (Lot 4): Process and publish diagnostic sensors/flags
+  // =========================================================================
+  if (this->diagnostics_enabled_) {
+    // Process diagnostics on the guarded (final) value
+    this->diagnostics_.process(guarded, now);
+    
+    const DiagnosticsStats &stats = this->diagnostics_.get_stats();
+    const DiagnosticsFlags &flags = this->diagnostics_.get_flags();
+    
+    // Publish diagnostic sensors if configured
+    if (this->diag_mean_sensor_ != nullptr && stats.is_valid()) {
+      this->diag_mean_sensor_->publish_state(stats.mean);
+    }
+    if (this->diag_sigma_sensor_ != nullptr && stats.is_valid()) {
+      this->diag_sigma_sensor_->publish_state(stats.sigma);
+    }
+    if (this->diag_ptp_sensor_ != nullptr && stats.is_valid()) {
+      this->diag_ptp_sensor_->publish_state(stats.ptp);
+    }
+    
+    // Publish diagnostic flags if configured
+    if (this->diag_noisy_flag_ != nullptr) {
+      this->diag_noisy_flag_->publish_state(flags.noisy);
+    }
+    if (this->diag_stuck_flag_ != nullptr) {
+      this->diag_stuck_flag_->publish_state(flags.stuck);
+    }
+    if (this->diag_out_of_range_flag_ != nullptr) {
+      this->diag_out_of_range_flag_->publish_state(flags.out_of_range);
+    }
+    
+    // Structured logging on abnormal events (rate-limited)
+    // Avoid spamming logs in calibration mode
+    bool in_cal_mode = this->parent_ != nullptr && this->parent_->is_calibration_mode();
+    if (!in_cal_mode && flags.has_any_problem() && this->diagnostics_.should_log_now(now)) {
+      if (flags.noisy) {
+        ESP_LOGW(TAG, "[pool_station] Channel %s: NOISY detected (ptp=%.4f, sigma=%.4f)",
+                 this->get_channel_type_name(), stats.ptp, stats.sigma);
+      }
+      if (flags.stuck) {
+        ESP_LOGW(TAG, "[pool_station] Channel %s: STUCK detected (value=%.3f, no change)",
+                 this->get_channel_type_name(), guarded);
+      }
+      if (flags.out_of_range) {
+        ESP_LOGW(TAG, "[pool_station] Channel %s: OUT_OF_RANGE (value=%.3f, range=[%.3f, %.3f])",
+                 this->get_channel_type_name(), guarded,
+                 this->diagnostics_config_.range_min, this->diagnostics_config_.range_max);
+      }
+      this->diagnostics_.mark_logged(now);
+    }
+  }
+  
   ESP_LOGV(TAG, "Channel %s: raw=%.4f, filtered=%.4f, cal=%.3f, guarded=%.3f (type=%s)",
            this->get_channel_type_name(), value, filtered_raw, calibrated, guarded,
            this->calibration_.get_type_name());
@@ -484,6 +635,40 @@ void PoolStationSensor::publish_value(float value) {
   this->last_calibrated_value_ = value;  // No calibration in legacy mode
   
   this->publish_state(value);
+}
+
+// ============================================================================
+// Diagnostic Flag Binary Sensors (Lot 4)
+// ============================================================================
+
+void DiagnosticNoisyFlag::setup() {
+  ESP_LOGD(TAG, "Setting up Diagnostic Noisy Flag for channel type %d", this->channel_type_);
+  this->publish_state(false);
+}
+
+void DiagnosticNoisyFlag::dump_config() {
+  LOG_BINARY_SENSOR("", "Diagnostic Noisy Flag", this);
+  ESP_LOGCONFIG(TAG, "  Channel type: %d", this->channel_type_);
+}
+
+void DiagnosticStuckFlag::setup() {
+  ESP_LOGD(TAG, "Setting up Diagnostic Stuck Flag for channel type %d", this->channel_type_);
+  this->publish_state(false);
+}
+
+void DiagnosticStuckFlag::dump_config() {
+  LOG_BINARY_SENSOR("", "Diagnostic Stuck Flag", this);
+  ESP_LOGCONFIG(TAG, "  Channel type: %d", this->channel_type_);
+}
+
+void DiagnosticOutOfRangeFlag::setup() {
+  ESP_LOGD(TAG, "Setting up Diagnostic Out Of Range Flag for channel type %d", this->channel_type_);
+  this->publish_state(false);
+}
+
+void DiagnosticOutOfRangeFlag::dump_config() {
+  LOG_BINARY_SENSOR("", "Diagnostic Out Of Range Flag", this);
+  ESP_LOGCONFIG(TAG, "  Channel type: %d", this->channel_type_);
 }
 
 }  // namespace pool_station

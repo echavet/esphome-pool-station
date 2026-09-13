@@ -23,6 +23,15 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 
 ## Current Status
 
+**Lot 4** — Diagnostics (noise / drift / flags):
+- ✅ Sliding window statistics: mean, σ (stddev), peak-to-peak
+- ✅ Optional diagnostic sensors (only created if declared in YAML)
+- ✅ Diagnostic flags as binary_sensors: `noisy`, `stuck`, `out_of_range`
+- ✅ Configurable thresholds: `noise_window`, `noise_warn_ptp`, `noise_warn_sigma`, `stuck_timeout`
+- ✅ Structured logging with tag `pool_station` on abnormal events (rate-limited)
+- ✅ Calibration mode: diagnostics run but avoid spamming logs
+- ✅ Pressure-friendly: enable diagnostics without heavy filters
+
 **Lot 3** — Filters & Companion Publication:
 - ✅ Per-channel filters (median window, jump guard, min/max clamp)
 - ✅ `calibrated_sensor` companion entity (pre-guard diagnostic)
@@ -297,6 +306,55 @@ raw → [median window] → raw_sensor → calibrate → calibrated_sensor
 
 > **Calibration Mode**: When ON, filters are bypassed for ~1s raw response during calibration capture.
 
+### Diagnostics Configuration (Lot 4)
+
+```yaml
+channels:
+  ph:
+    # ... source, calibration, filters, etc.
+    
+    diagnostics:
+      # Noise detection thresholds
+      noise_window: 10         # Sliding window size (2-50)
+      noise_warn_ptp: 0.3      # Peak-to-peak threshold (0 = off)
+      noise_warn_sigma: 0.1    # Stddev threshold (0 = off)
+      
+      # Stuck detection
+      stuck_timeout: 300s      # Duration without change (0 = off)
+      stuck_threshold: 0.01    # Minimum change to consider "not stuck"
+      
+      # Out-of-range detection
+      range_min: 0.0           # Min valid value (omit = no check)
+      range_max: 14.0          # Max valid value (omit = no check)
+      
+      # Logging
+      log_rate_limit: 60s      # Rate limit for warning logs
+      
+      # Optional sensors (only created if declared)
+      mean_sensor:
+        name: "Pool pH Mean"
+      sigma_sensor:
+        name: "Pool pH Noise (σ)"
+      ptp_sensor:
+        name: "Pool pH Peak-to-Peak"
+      
+      # Optional flags (only created if declared)
+      noisy:
+        name: "Pool pH Noisy"
+      stuck:
+        name: "Pool pH Stuck"
+      out_of_range:
+        name: "Pool pH Out Of Range"
+```
+
+### Diagnostics Recommendations
+
+| Channel | noise_warn_ptp | noise_warn_sigma | stuck_timeout | Notes |
+|---------|---------------|------------------|---------------|-------|
+| **Pressure** | — | — | — | Diagnostics optional, fast response needed |
+| **pH** | 0.2-0.5 | 0.05-0.15 | 3-10 min | Moderate noise detection |
+| **ORP** | 20-50 mV | 5-15 mV | 5-15 min | ORP changes slowly |
+
 ### Filter Recommendations
 
 | Channel | filter_samples | max_jump | Rationale |
@@ -324,12 +382,44 @@ Use calibration mode when:
 | 0 | Skeleton, docs, sensor stub | ✅ Done |
 | 1 | ADS1115 binding, raw values, calibration mode | ✅ Done |
 | 2 | N-point calibration, Capturer UI, persistence | ✅ Done |
-| **3** | **j5-like filters (median, max_jump, streak, clamp)** | ✅ **Current** |
-| 4 | Diagnostics (noise σ/ptp, jumps, drift detection) | 📋 Planned |
+| 3 | j5-like filters (median, max_jump, streak, clamp) | ✅ Done |
+| **4** | **Diagnostics (noise σ/ptp, stuck, out_of_range flags)** | ✅ **Current** |
 | 5 | Water temperature compensation (Tw) | 📋 Planned |
 | 6 | Gates/campaigns (conditional sampling) | 📋 Planned |
 | 7 | HA polish, runtime algo select, services | 📋 Planned |
 | 8 | (Optional) Interference detection, EZO support | 🔮 Future |
+
+## Lot 4 — What's New
+
+### Diagnostic Statistics
+- **noise_window**: Sliding window size for computing statistics (2-50 samples)
+- **mean**: Mean value over the sliding window
+- **sigma**: Standard deviation (σ) — noise indicator
+- **ptp**: Peak-to-peak (max - min) over the window
+
+### Diagnostic Flags (binary_sensors)
+- **noisy**: True when ptp or σ exceeds configured thresholds
+- **stuck**: True when no meaningful change for `stuck_timeout` duration
+- **out_of_range**: True when value is outside `range_min`/`range_max`
+
+### Opt-In Entities
+- Diagnostic sensors and flags are **only created if declared** in YAML
+- Avoids Home Assistant entity explosion for simple setups
+- Pressure channels can enable diagnostics without heavy filters
+
+### Structured Logging
+- Rate-limited diagnostic warnings with tag `pool_station`
+- Suppressed in calibration mode to avoid log spam
+- Configurable via `log_rate_limit` (default 60s)
+
+### Lovelace-Friendly Entity Names
+Example entities for pH channel:
+- `sensor.pool_ph_mean` — Mean pH over window
+- `sensor.pool_ph_noise` — Stddev (σ) of pH readings  
+- `sensor.pool_ph_peak_to_peak` — Max - Min over window
+- `binary_sensor.pool_ph_noisy` — ON when noise exceeds thresholds
+- `binary_sensor.pool_ph_stuck` — ON when no change for stuck_timeout
+- `binary_sensor.pool_ph_out_of_range` — ON when outside valid range
 
 ## Lot 3 — What's New
 

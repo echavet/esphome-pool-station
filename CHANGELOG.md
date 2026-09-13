@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-13
+
+### Added — Lot 4: Diagnostics (noise / drift / flags)
+
+#### Diagnostics Module (`channel_diagnostics.h/cpp`)
+- New `DiagnosticsConfig` struct for configurable thresholds
+- New `DiagnosticsStats` struct for computed statistics (mean, σ, ptp)
+- New `DiagnosticsFlags` struct for boolean indicators (noisy, stuck, out_of_range)
+- New `DiagnosticsWindow` class for sliding window statistics
+- New `StuckDetector` class for detecting sensor stuck conditions
+- New `ChannelDiagnostics` class coordinating all diagnostics per channel
+- Pure functions in `diagnostic_functions` namespace (unit-testable)
+
+#### Diagnostic Configuration
+- `noise_window`: Sliding window size for statistics (2-50 samples)
+- `noise_warn_ptp`: Peak-to-peak threshold for noisy flag (0 = off)
+- `noise_warn_sigma`: Standard deviation threshold for noisy flag (0 = off)
+- `stuck_timeout`: Duration without change to trigger stuck flag
+- `stuck_threshold`: Minimum change to consider "not stuck"
+- `range_min` / `range_max`: Out-of-range detection bounds
+- `log_rate_limit`: Rate limiting for diagnostic log messages
+
+#### Opt-In Diagnostic Sensors
+- `mean_sensor`: Mean value over sliding window
+- `sigma_sensor`: Standard deviation (noise indicator)
+- `ptp_sensor`: Peak-to-peak (max - min) over window
+- Sensors only created if declared in YAML (avoids entity explosion)
+
+#### Opt-In Diagnostic Flags (binary_sensors)
+- `noisy`: True when ptp or σ exceeds configured thresholds
+- `stuck`: True when no meaningful change for stuck_timeout
+- `out_of_range`: True when value outside range_min/max
+- Flags only created if declared in YAML
+
+#### Structured Logging
+- Rate-limited warnings with tag `pool_station` on abnormal events
+- Suppressed in calibration mode to avoid log spam
+- Logs include channel name, flag type, and relevant values
+
+#### Integration Stubs (Lot 6 preparation)
+- Placeholder flags: `cal_invalid`, `gate_blocked`, `campaign_running`
+- Ready for integration with future Gates/Campaigns lot
+
+### Changed
+- `PoolStationChannelSensor` now integrates `ChannelDiagnostics`
+- Pipeline extended: ... → jump guard → diagnostics → publish
+- `dump_config()` outputs diagnostics configuration
+- Python codegen (`__init__.py`) extended with `diagnostics:` schema
+- Example YAML demonstrates full Lot 4 diagnostics configuration
+
+### Technical Notes
+- Diagnostics process on final guarded value (post-filters)
+- Standard deviation uses Welford's online algorithm
+- Jump magnitude and streak tracked (reuses Lot 3 JumpGuard state pattern)
+- Calibration mode: diagnostics run but logs are suppressed
+- Pressure-friendly: can enable diagnostics without heavy filters
+
+---
+
 ## [0.3.0] - 2026-09-13
 
 ### Added — Lot 3: Filters & Companion Publication
@@ -204,8 +263,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0 | 0.0.1 | ✅ Skeleton, docs | Done |
 | 1 | 0.1.0 | ✅ ADS1115 binding, raw values, calibration mode | Done |
 | 2 | 0.2.0 | ✅ N-point calibration, Capturer UI, persistence | Done |
-| **3** | **0.3.0** | ✅ **Filters (j5-like median, jump, clamp)** | **Current** |
-| 4 | 0.4.0 | Diagnostics (noise σ/ptp) | Planned |
+| 3 | 0.3.0 | ✅ Filters (j5-like median, jump, clamp) | Done |
+| **4** | **0.4.0** | ✅ **Diagnostics (noise σ/ptp, flags)** | **Current** |
 | 5 | 0.5.0 | Temperature compensation (Tw) | Planned |
 | 6 | 0.6.0 | Gates/campaigns | Planned |
 | 7 | 1.0.0 | HA polish, runtime algo select | Planned |
