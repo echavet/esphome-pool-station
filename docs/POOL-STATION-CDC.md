@@ -53,13 +53,13 @@
 
 ### F-FLT : Filtres
 
-| ID | Exigence | Lot |
-|----|----------|-----|
-| F-FLT-01 | `filter_samples` : médiane/moyenne sur N échantillons | 3 |
-| F-FLT-02 | `max_jump` : rejet des sauts aberrants | 3 |
-| F-FLT-03 | `streak` : validation par séquence stable | 3 |
-| F-FLT-04 | `min/max` : clamp des valeurs hors plage | 3 |
-| F-FLT-05 | Publication raw et calibrated séparément | 3 |
+| ID | Exigence | Lot | Status |
+|----|----------|-----|--------|
+| F-FLT-01 | `filter_samples` : médiane/moyenne sur N échantillons | 3 | ✅ Done |
+| F-FLT-02 | `max_jump` : rejet des sauts aberrants | 3 | ✅ Done |
+| F-FLT-03 | `streak` : validation par séquence stable | 3 | ✅ Done |
+| F-FLT-04 | `min/max` : clamp des valeurs hors plage | 3 | ✅ Done |
+| F-FLT-05 | Publication raw et calibrated séparément | 3 | ✅ Done |
 
 ### F-DIAG : Diagnostics
 
@@ -154,12 +154,12 @@
 |-----|---------|--------|
 | 0 | Squelette, docs, sensor stub | ✅ Done |
 | 1 | ADS1115 binding, raw values, cal mode switch | ✅ Done |
-| **2** | **N-point calibration, Capturer, persistence** | ✅ **Current** |
-| 3 | Filters (j5-like) | Planned |
-| 4 | Diagnostics (noise, jumps, drift) | Planned |
-| 5 | Water temp compensation | Planned |
+| 2 | N-point calibration, Capturer, persistence | ✅ Done |
+| **3** | **Filters (j5-like median, jump, clamp)** | ✅ **Current** |
+| 4 | Diagnostics (noise σ/ptp, jumps, drift) | Planned |
+| 5 | Water temp compensation (Tw) | Planned |
 | 6 | Gates/campaigns | Planned |
-| 7 | HA polish, services, migration guide | Planned |
+| 7 | HA polish, runtime algo select, services | Planned |
 | 8 | (Optionnel) Interference detection, EZO | Future |
 
 ## 8. Critères d'acceptation

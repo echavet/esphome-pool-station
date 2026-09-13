@@ -1,10 +1,12 @@
-# Pool Station — Minimal Example Configuration (Lot 2)
+# Pool Station — Example Configuration (Lot 3)
 # 
-# This configuration demonstrates the Lot 2 features:
+# This configuration demonstrates Lot 2 and Lot 3 features:
 #   - N-point calibration with multiple algorithms
 #   - Capturer UI for calibration from Home Assistant
 #   - Calibration persistence across reboots
 #   - cal_invalid indicator when calibration is insufficient
+#   - Lot 3: Filters (median window, jump guard, min/max clamp)
+#   - Lot 3: Calibrated sensor (pre-guard diagnostic)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -173,6 +175,8 @@ pool_station:
     # PRESSURE Channel
     # Example: 0-5V output for 0-10 bar sensor
     # Using LINEAR calibration with 2 points
+    # 
+    # FILTERS: OFF (per Eric requirement - pressure needs fast, unfiltered response)
     # =========================================================================
     pressure:
       source_id: ads_pressure
@@ -196,6 +200,12 @@ pool_station:
           - x: 4.5    # Volts at 10 bar
             y: 10.0   # bar
       
+      # Filters: explicitly OFF for pressure (this is the default)
+      # Pressure sensors need fast response without smoothing
+      # filters:
+      #   filter_samples: 0     # No median (default)
+      #   max_jump: 0.0         # No jump guard (default)
+      
       # Capturer UI - allows editing calibration from HA
       capturer:
         point_count: 2
@@ -210,6 +220,9 @@ pool_station:
     # =========================================================================
     # pH Channel
     # Using PIECEWISE multi-point calibration (pH 4, 7, 10)
+    # 
+    # FILTERS: Mild median + value clamp (pH readings can be noisy)
+    # Calibration mode bypasses filters for ~1s raw response
     # =========================================================================
     ph:
       source_id: ads_ph
@@ -219,8 +232,14 @@ pool_station:
       icon: "mdi:ph"
       update_interval: 60s
       
+      # Raw voltage diagnostic sensor (post-median filtered value)
       raw_sensor:
         name: "Pool pH Raw"
+      
+      # Calibrated sensor (pre-guard diagnostic value)
+      # Shows calibrated value before jump guard filtering
+      calibrated_sensor:
+        name: "Pool pH Calibrated"
       
       # Calibration: piecewise 3-point (pH 4, 7, 10 buffers)
       # These are example values - replace with your actual calibration
@@ -234,6 +253,15 @@ pool_station:
             y: 7.00   # pH buffer 7
           - x: 0.98   # Volts at pH 10.00
             y: 10.00  # pH buffer 10
+      
+      # Filters (Lot 3): mild smoothing without breaking Capturer
+      # Pipeline: raw → median → calibrate → clamp → jump guard → publish
+      filters:
+        filter_samples: 5        # 5-sample median window (smooths noise)
+        max_jump: 0.5            # Reject pH jumps > 0.5
+        max_jump_streak: 3       # Accept new plateau after 3 consistent readings
+        value_min: 0.0           # Clamp to valid pH range
+        value_max: 14.0
       
       # Capturer UI - 3 points for pH 4/7/10 calibration
       capturer:
@@ -249,6 +277,8 @@ pool_station:
     # ORP Channel
     # Using DFROBOT_ORP algorithm (SEN0165-like mid/offset)
     # Formula: ORP_mV = mid_mv - (V * 1000) - offset_mv
+    # 
+    # FILTERS: Jump guard to reject electrical spikes
     # =========================================================================
     orp:
       source_id: ads_orp
@@ -261,6 +291,10 @@ pool_station:
       raw_sensor:
         name: "Pool ORP Raw"
       
+      # Calibrated sensor (pre-guard)
+      calibrated_sensor:
+        name: "Pool ORP Calibrated"
+      
       # Calibration: DFRobot SEN0165-like algorithm
       # mid_mv: midpoint reference (typically 2500 for 2.5V VRef)
       # offset_mv: calibration offset from known ORP solution
@@ -268,6 +302,15 @@ pool_station:
         type: dfrobot_orp
         mid_mv: 2500.0
         offset_mv: 0.0
+      
+      # Filters (Lot 3): jump guard for ORP spikes
+      # ORP can have electrical spikes from pump interference
+      filters:
+        filter_samples: 3        # 3-sample median (light smoothing)
+        max_jump: 50.0           # Reject ORP jumps > 50 mV
+        max_jump_streak: 4       # Accept new level after 4 consistent readings
+        value_min: -500.0        # Reasonable ORP range
+        value_max: 1000.0
       
       # Capturer UI - includes mid/offset numbers for DFRobot
       capturer:
@@ -291,6 +334,7 @@ pool_station:
 #
 # 1. TURN ON CALIBRATION MODE
 #    Toggle "Pool Calibration Mode" switch ON for fast 1s sampling.
+#    NOTE: Calibration mode bypasses filters for immediate raw response!
 #
 # 2. CAPTURE CALIBRATION POINTS
 #    For pH calibration example:
@@ -310,6 +354,40 @@ pool_station:
 #
 # 5. TURN OFF CALIBRATION MODE
 #    Toggle "Pool Calibration Mode" switch OFF to return to normal sampling.
+#    Filters will now be active again.
+#
+# =============================================================================
+# SIGNAL PROCESSING PIPELINE (Lot 3)
+# =============================================================================
+#
+#   raw → [median window] → raw_sensor → calibrate → calibrated_sensor
+#       → [clamp] → [jump guard] → main entity
+#
+# - raw: Original ADC voltage from source sensor
+# - median window: Optional N-sample median filter (filter_samples > 1)
+# - raw_sensor: Diagnostic entity showing filtered raw voltage
+# - calibrate: Apply calibration algorithm (linear, piecewise, etc.)
+# - calibrated_sensor: Diagnostic entity showing calibrated value PRE-guard
+# - clamp: Optional min/max value bounds (value_min, value_max)
+# - jump guard: Optional absurd jump rejection (max_jump, max_jump_streak)
+# - main entity: Final guarded value published to Home Assistant
+#
+# CALIBRATION MODE: Bypasses median window and jump guard for ~1s response
+#
+# =============================================================================
+# FILTER CONFIGURATION (Lot 3)
+# =============================================================================
+#
+# filters:
+#   filter_samples: 0-20   # Median window size (0 or 1 = off)
+#   max_jump: 0.0+         # Max allowed change (0 = off)
+#   max_jump_streak: 1-10  # Accept new plateau after N consistent jumps
+#   value_min: float       # Min clamp (omit = no min)
+#   value_max: float       # Max clamp (omit = no max)
+#
+# PRESSURE: Keep filters OFF (fast response needed)
+# pH: Mild median (5) + jump guard (0.5) + clamp (0-14)
+# ORP: Light median (3) + jump guard (50mV) + clamp
 #
 # =============================================================================
 # CALIBRATION ALGORITHMS AVAILABLE

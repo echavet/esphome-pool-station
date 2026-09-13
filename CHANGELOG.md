@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-13
+
+### Added — Lot 3: Filters & Companion Publication
+
+#### Per-Channel Filters (`channel_filter.h/cpp`)
+- New `ChannelFilterConfig` struct for filter settings
+- New `SlidingWindow` class for N-sample median/mean filtering
+- New `JumpGuard` class for outlier rejection with plateau detection
+- Pure functions in `filter_functions` namespace (unit-testable)
+- `compute_median()`, `compute_mean()`, `clamp_value()`, `is_jump_exceeded()`
+
+#### Filter Configuration
+- `filter_samples`: Median window size (0 or 1 = off, up to 20)
+- `max_jump`: Maximum allowed change between readings (0 = disabled)
+- `max_jump_streak`: Accept new plateau after N consecutive similar jumps
+- `value_min` / `value_max`: Clamp calibrated values to valid range
+
+#### Companion Entities
+- `calibrated_sensor`: Diagnostic sensor showing calibrated value BEFORE guards
+- Main channel entity now publishes fully guarded value
+- Pipeline: raw → median → raw_sensor → calibrate → calibrated_sensor → clamp → jump → publish
+
+#### Calibration Mode Filter Bypass
+- When Calibration Mode is ON, median window and jump guard are bypassed
+- Ensures Capturer UI shows immediate ~1s raw response during calibration
+- Jump guard baseline resets when toggling calibration mode
+
+### Changed
+- `PoolStationChannelSensor` now includes filter state (SlidingWindow, JumpGuard)
+- `on_source_value_()` implements full signal processing pipeline
+- `dump_config()` outputs filter configuration
+- Python codegen (`__init__.py`) extended with `filters:` and `calibrated_sensor:` schemas
+
+### Technical Notes
+- Filters default to OFF (`filter_samples: 0`, `max_jump: 0.0`)
+- Pressure channels intentionally keep filters OFF for fast response
+- pH/ORP examples demonstrate mild median (3-5 samples) + jump guards
+- Median uses `std::nth_element` for O(n) performance
+- Jump guard tracks pending values for plateau detection
+
+---
+
 ## [0.2.0] - 2026-09-13
 
 ### Added — Lot 2: N-Point Calibration & Capturer UI
@@ -161,12 +203,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 |-----|---------|---------|--------|
 | 0 | 0.0.1 | ✅ Skeleton, docs | Done |
 | 1 | 0.1.0 | ✅ ADS1115 binding, raw values, calibration mode | Done |
-| **2** | **0.2.0** | ✅ **N-point calibration, Capturer UI, persistence** | **Current** |
-| 3 | 0.3.0 | Filters (j5-like) | Planned |
-| 4 | 0.4.0 | Diagnostics | Planned |
-| 5 | 0.5.0 | Temperature compensation | Planned |
+| 2 | 0.2.0 | ✅ N-point calibration, Capturer UI, persistence | Done |
+| **3** | **0.3.0** | ✅ **Filters (j5-like median, jump, clamp)** | **Current** |
+| 4 | 0.4.0 | Diagnostics (noise σ/ptp) | Planned |
+| 5 | 0.5.0 | Temperature compensation (Tw) | Planned |
 | 6 | 0.6.0 | Gates/campaigns | Planned |
-| 7 | 1.0.0 | HA polish, stable release | Planned |
+| 7 | 1.0.0 | HA polish, runtime algo select | Planned |
 
 ## Future Lots (Lot 7 candidates)
 

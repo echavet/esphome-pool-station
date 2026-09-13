@@ -83,6 +83,15 @@ CONF_PH = "ph"
 CONF_ORP = "orp"
 CONF_SOURCE_ID = "source_id"
 CONF_RAW_SENSOR = "raw_sensor"
+CONF_CALIBRATED_SENSOR = "calibrated_sensor"
+
+# Filter configuration keys (Lot 3)
+CONF_FILTERS = "filters"
+CONF_FILTER_SAMPLES = "filter_samples"
+CONF_MAX_JUMP = "max_jump"
+CONF_MAX_JUMP_STREAK = "max_jump_streak"
+CONF_VALUE_MIN = "value_min"
+CONF_VALUE_MAX = "value_max"
 
 # Calibration configuration keys
 CONF_CALIBRATION = "calibration"
@@ -195,6 +204,25 @@ def calibration_schema():
     })
 
 
+def filters_schema():
+    """Schema for channel filter configuration (Lot 3).
+    
+    Pipeline order: raw → median window → calibrate → clamp → jump guard → publish
+    
+    - filter_samples: Median sliding window size (0 or 1 = off)
+    - max_jump: Maximum allowed change between readings (0 = disabled)
+    - max_jump_streak: Accept new plateau after N consecutive similar values
+    - value_min/value_max: Clamp calibrated values to range
+    """
+    return cv.Schema({
+        cv.Optional(CONF_FILTER_SAMPLES, default=0): cv.int_range(min=0, max=20),
+        cv.Optional(CONF_MAX_JUMP, default=0.0): cv.float_,
+        cv.Optional(CONF_MAX_JUMP_STREAK, default=3): cv.int_range(min=1, max=10),
+        cv.Optional(CONF_VALUE_MIN): cv.float_,
+        cv.Optional(CONF_VALUE_MAX): cv.float_,
+    })
+
+
 def capturer_schema(channel_type):
     """Schema for capturer UI configuration."""
     return cv.Schema({
@@ -228,8 +256,18 @@ def channel_schema(channel_type):
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             icon="mdi:sine-wave",
         ),
+        # Calibrated sensor (pre-guard diagnostic value) - Lot 3
+        cv.Optional(CONF_CALIBRATED_SENSOR): sensor.sensor_schema(
+            unit_of_measurement=defaults.get("unit", ""),
+            accuracy_decimals=defaults.get("accuracy", 2),
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon=defaults.get("icon", "mdi:gauge"),
+        ),
         # Calibration configuration
         cv.Optional(CONF_CALIBRATION): calibration_schema(),
+        # Filter configuration (Lot 3)
+        cv.Optional(CONF_FILTERS): filters_schema(),
         # Capturer UI for calibration
         cv.Optional(CONF_CAPTURER): capturer_schema(channel_type),
         # Calibration invalid binary sensor
@@ -477,6 +515,23 @@ async def to_code(config):
                 raw_conf = ch_conf[CONF_RAW_SENSOR]
                 raw_var = await sensor.new_sensor(raw_conf)
                 cg.add(ch_var.set_raw_sensor(raw_var))
+            
+            # Create calibrated sensor (pre-guard diagnostic) if configured - Lot 3
+            if CONF_CALIBRATED_SENSOR in ch_conf:
+                cal_sens_conf = ch_conf[CONF_CALIBRATED_SENSOR]
+                cal_sens_var = await sensor.new_sensor(cal_sens_conf)
+                cg.add(ch_var.set_calibrated_sensor(cal_sens_var))
+            
+            # Configure filters (Lot 3)
+            if CONF_FILTERS in ch_conf:
+                flt_conf = ch_conf[CONF_FILTERS]
+                cg.add(ch_var.set_filter_samples(flt_conf[CONF_FILTER_SAMPLES]))
+                cg.add(ch_var.set_max_jump(flt_conf[CONF_MAX_JUMP]))
+                cg.add(ch_var.set_max_jump_streak(flt_conf[CONF_MAX_JUMP_STREAK]))
+                if CONF_VALUE_MIN in flt_conf:
+                    cg.add(ch_var.set_value_min(flt_conf[CONF_VALUE_MIN]))
+                if CONF_VALUE_MAX in flt_conf:
+                    cg.add(ch_var.set_value_max(flt_conf[CONF_VALUE_MAX]))
             
             # Configure calibration
             if CONF_CALIBRATION in ch_conf:

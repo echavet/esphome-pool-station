@@ -23,6 +23,13 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 
 ## Current Status
 
+**Lot 3** — Filters & Companion Publication:
+- ✅ Per-channel filters (median window, jump guard, min/max clamp)
+- ✅ `calibrated_sensor` companion entity (pre-guard diagnostic)
+- ✅ Pressure defaults: filters OFF (fast response)
+- ✅ Calibration mode bypasses filters (~1s raw response)
+- ✅ Pipeline: raw → median → calibrate → clamp → jump guard → publish
+
 **Lot 2** — N-Point Calibration & Capturer UI:
 - ✅ N-point calibration (1 to 10 points per channel)
 - ✅ Multiple algorithms: linear, polynomial, piecewise, dfrobot_orp
@@ -250,6 +257,54 @@ channels:
       name: "pH Cal Invalid"
 ```
 
+### Filter Configuration (Lot 3)
+
+```yaml
+channels:
+  ph:
+    # ... source, calibration, etc.
+    
+    # Calibrated sensor (pre-guard diagnostic value)
+    calibrated_sensor:
+      name: "Pool pH Calibrated"
+    
+    # Filter configuration
+    filters:
+      filter_samples: 5         # Median window size (0 or 1 = off)
+      max_jump: 0.5             # Max allowed change (0 = off)
+      max_jump_streak: 3        # Accept new plateau after N consistent jumps
+      value_min: 0.0            # Min clamp value (omit = no min)
+      value_max: 14.0           # Max clamp value (omit = no max)
+```
+
+### Signal Processing Pipeline
+
+```
+raw → [median window] → raw_sensor → calibrate → calibrated_sensor
+    → [clamp] → [jump guard] → main entity
+```
+
+| Stage | Description | Config |
+|-------|-------------|--------|
+| **raw** | Original ADC voltage | — |
+| **median window** | N-sample median filter | `filter_samples` (0/1 = off) |
+| **raw_sensor** | Diagnostic: filtered raw voltage | `raw_sensor:` block |
+| **calibrate** | Apply calibration algorithm | `calibration:` block |
+| **calibrated_sensor** | Diagnostic: calibrated value pre-guard | `calibrated_sensor:` block |
+| **clamp** | Min/max value bounds | `value_min`, `value_max` |
+| **jump guard** | Reject absurd jumps | `max_jump`, `max_jump_streak` |
+| **main entity** | Final guarded value | Channel name |
+
+> **Calibration Mode**: When ON, filters are bypassed for ~1s raw response during calibration capture.
+
+### Filter Recommendations
+
+| Channel | filter_samples | max_jump | Rationale |
+|---------|---------------|----------|-----------|
+| **Pressure** | 0 (off) | 0 (off) | Fast response needed |
+| **pH** | 3-5 | 0.3-0.5 | Smooth noise, reject spikes |
+| **ORP** | 3-5 | 30-50 mV | Filter electrical interference |
+
 ### Calibration Mode
 
 The **Calibration Mode Switch** controls sampling frequency:
@@ -268,13 +323,35 @@ Use calibration mode when:
 |-----|---------|--------|
 | 0 | Skeleton, docs, sensor stub | ✅ Done |
 | 1 | ADS1115 binding, raw values, calibration mode | ✅ Done |
-| **2** | **N-point calibration, Capturer UI, persistence** | ✅ **Current** |
-| 3 | j5-like filters (median, max_jump, streak, clamp) | 📋 Planned |
-| 4 | Diagnostics (noise, jumps, drift detection) | 📋 Planned |
-| 5 | Water temperature compensation | 📋 Planned |
+| 2 | N-point calibration, Capturer UI, persistence | ✅ Done |
+| **3** | **j5-like filters (median, max_jump, streak, clamp)** | ✅ **Current** |
+| 4 | Diagnostics (noise σ/ptp, jumps, drift detection) | 📋 Planned |
+| 5 | Water temperature compensation (Tw) | 📋 Planned |
 | 6 | Gates/campaigns (conditional sampling) | 📋 Planned |
-| 7 | HA polish, services, migration guide | 📋 Planned |
+| 7 | HA polish, runtime algo select, services | 📋 Planned |
 | 8 | (Optional) Interference detection, EZO support | 🔮 Future |
+
+## Lot 3 — What's New
+
+### Per-Channel Filters
+- **filter_samples**: Median sliding window (0 or 1 = off)
+- **max_jump**: Reject absurd jumps between readings
+- **max_jump_streak**: Accept new plateau after N consistent jumps
+- **value_min / value_max**: Clamp calibrated values to range
+
+### Companion Entities
+- **raw_sensor**: Diagnostic raw voltage (already in Lot 1)
+- **calibrated_sensor**: Diagnostic calibrated value BEFORE guards (Lot 3)
+- **Main entity**: Final guarded value with all filters applied
+
+### Calibration Mode Bypass
+- When Calibration Mode is ON, filters are bypassed for ~1s raw response
+- Ensures Capturer UI shows immediate readings during calibration
+- Jump guard baseline resets on calibration mode toggle
+
+### Pressure Defaults
+- All filters OFF by default (`filter_samples: 0`, `max_jump: 0`)
+- Pressure sensors need fast, unfiltered response for monitoring
 
 ## Lot 2 — What's New
 

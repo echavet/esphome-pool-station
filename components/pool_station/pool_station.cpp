@@ -195,6 +195,22 @@ void PoolStationChannelSensor::setup() {
   // Load calibration from preferences (if available)
   this->calibration_.load_from_preferences();
   
+  // Initialize filter components (Lot 3)
+  if (this->filter_config_.is_median_enabled()) {
+    this->raw_window_.set_size(this->filter_config_.filter_samples);
+    ESP_LOGD(TAG, "Channel %s median filter: %d samples", 
+             this->get_channel_type_name(), this->filter_config_.filter_samples);
+  }
+  
+  if (this->filter_config_.is_jump_guard_enabled()) {
+    this->jump_guard_.set_max_jump(this->filter_config_.max_jump);
+    this->jump_guard_.set_streak_threshold(this->filter_config_.max_jump_streak);
+    ESP_LOGD(TAG, "Channel %s jump guard: max_jump=%.3f, streak=%d",
+             this->get_channel_type_name(), 
+             this->filter_config_.max_jump, 
+             this->filter_config_.max_jump_streak);
+  }
+  
   // Subscribe to source sensor
   this->source_sensor_->add_on_state_callback([this](float value) {
     this->on_source_value_(value);
@@ -221,6 +237,27 @@ void PoolStationChannelSensor::dump_config() {
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->configured_interval_);
   if (this->raw_sensor_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Raw sensor: configured");
+  }
+  if (this->calibrated_sensor_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Calibrated sensor (pre-guard): configured");
+  }
+  
+  // Dump filter config (Lot 3)
+  ESP_LOGCONFIG(TAG, "  Filters:");
+  ESP_LOGCONFIG(TAG, "    filter_samples: %d%s", 
+                this->filter_config_.filter_samples,
+                this->filter_config_.is_median_enabled() ? " (median enabled)" : " (off)");
+  ESP_LOGCONFIG(TAG, "    max_jump: %.3f%s", 
+                this->filter_config_.max_jump,
+                this->filter_config_.is_jump_guard_enabled() ? "" : " (off)");
+  if (this->filter_config_.is_jump_guard_enabled()) {
+    ESP_LOGCONFIG(TAG, "    max_jump_streak: %d", this->filter_config_.max_jump_streak);
+  }
+  if (!std::isnan(this->filter_config_.value_min)) {
+    ESP_LOGCONFIG(TAG, "    value_min: %.3f", this->filter_config_.value_min);
+  }
+  if (!std::isnan(this->filter_config_.value_max)) {
+    ESP_LOGCONFIG(TAG, "    value_max: %.3f", this->filter_config_.value_max);
   }
   
   // Dump calibration config
@@ -264,6 +301,26 @@ void PoolStationChannelSensor::set_preferences_key(uint32_t key) {
   this->calibration_.set_preferences_key(key);
 }
 
+void PoolStationChannelSensor::set_filter_samples(uint8_t samples) {
+  this->filter_config_.filter_samples = samples;
+}
+
+void PoolStationChannelSensor::set_max_jump(float max_jump) {
+  this->filter_config_.max_jump = max_jump;
+}
+
+void PoolStationChannelSensor::set_max_jump_streak(uint8_t streak) {
+  this->filter_config_.max_jump_streak = streak;
+}
+
+void PoolStationChannelSensor::set_value_min(float min) {
+  this->filter_config_.value_min = min;
+}
+
+void PoolStationChannelSensor::set_value_max(float max) {
+  this->filter_config_.value_max = max;
+}
+
 void PoolStationChannelSensor::notify_calibration_updated() {
   // This is called after a capture button press or manual point edit
   // We could trigger number entity updates here if needed
@@ -283,50 +340,114 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   }
   this->last_update_ = now;
   
+  // =========================================================================
+  // PIPELINE: raw → median → raw_sensor → calibrate → calibrated_sensor 
+  //           → clamp → jump guard → publish
+  // =========================================================================
+  
+  // Step 1: Store original raw value
   this->last_raw_value_ = value;
   
-  // Publish raw value to diagnostic sensor
+  // Step 2: Apply median window filter (if enabled)
+  // In calibration mode, bypass median for ~1s raw response
+  float filtered_raw = value;
+  if (this->filter_config_.is_median_enabled()) {
+    bool bypass_median = this->parent_ != nullptr && this->parent_->is_calibration_mode();
+    if (!bypass_median) {
+      this->raw_window_.push(value);
+      if (this->raw_window_.is_full()) {
+        filtered_raw = this->raw_window_.median();
+      }
+    }
+  }
+  this->last_filtered_raw_ = filtered_raw;
+  
+  // Step 3: Publish raw value to diagnostic sensor (post-median if enabled)
   if (this->raw_sensor_ != nullptr) {
-    this->raw_sensor_->publish_state(value);
+    this->raw_sensor_->publish_state(filtered_raw);
   }
   
-  // Apply calibration
+  // Step 4: Apply calibration
   float calibrated;
   if (this->calibration_.get_type() != CAL_TYPE_NONE && this->calibration_.is_valid()) {
-    calibrated = this->calibration_.calibrate(value);
+    calibrated = this->calibration_.calibrate(filtered_raw);
   } else {
     // Fallback: use channel-specific default transforms
     switch (this->channel_type_) {
       case CHANNEL_TYPE_PRESSURE:
         // Pass-through voltage (user should configure calibration)
-        calibrated = value;
+        calibrated = filtered_raw;
         break;
         
       case CHANNEL_TYPE_PH:
         // Pass-through voltage (user should configure calibration)
-        calibrated = value;
+        calibrated = filtered_raw;
         break;
         
       case CHANNEL_TYPE_ORP:
         // Default: convert V to mV
-        calibrated = value * 1000.0f;
+        calibrated = filtered_raw * 1000.0f;
         break;
         
       default:
-        calibrated = value;
+        calibrated = filtered_raw;
         break;
     }
   }
-  
   this->last_calibrated_value_ = calibrated;
   
-  // Publish calibrated value
-  this->publish_state(calibrated);
+  // Step 5: Publish calibrated value to diagnostic sensor (pre-guard)
+  if (this->calibrated_sensor_ != nullptr) {
+    this->calibrated_sensor_->publish_state(calibrated);
+  }
   
-  ESP_LOGV(TAG, "Channel %s: raw=%.4f V, calibrated=%.2f (type=%s, valid=%s)", 
-           this->get_channel_type_name(), value, calibrated,
-           this->calibration_.get_type_name(),
-           this->calibration_.is_valid() ? "yes" : "no");
+  // Step 6: Apply value clamp (min/max guards)
+  float guarded = calibrated;
+  if (this->filter_config_.is_clamp_enabled()) {
+    guarded = filter_functions::clamp_value(
+        guarded, 
+        this->filter_config_.value_min, 
+        this->filter_config_.value_max);
+  }
+  
+  // Step 7: Apply jump guard (reject absurd jumps, accept new plateau after streak)
+  // In calibration mode, bypass jump guard for immediate response
+  if (this->filter_config_.is_jump_guard_enabled()) {
+    bool bypass_jump = this->parent_ != nullptr && this->parent_->is_calibration_mode();
+    if (!bypass_jump) {
+      bool rejected = false;
+      guarded = this->jump_guard_.process(guarded, rejected);
+      if (rejected) {
+        ESP_LOGD(TAG, "Channel %s: jump rejected (%.3f → %.3f, keeping %.3f)",
+                 this->get_channel_type_name(), 
+                 this->last_guarded_value_, calibrated, guarded);
+      }
+    } else {
+      // Reset jump guard baseline in calibration mode
+      this->jump_guard_.reset();
+      bool dummy = false;
+      this->jump_guard_.process(guarded, dummy);
+    }
+  }
+  this->last_guarded_value_ = guarded;
+  
+  // Step 8: Publish final guarded value
+  this->publish_state(guarded);
+  
+  ESP_LOGV(TAG, "Channel %s: raw=%.4f, filtered=%.4f, cal=%.3f, guarded=%.3f (type=%s)",
+           this->get_channel_type_name(), value, filtered_raw, calibrated, guarded,
+           this->calibration_.get_type_name());
+}
+
+float PoolStationChannelSensor::apply_filters_(float raw_value) {
+  // Helper method for testing (not used in main pipeline currently)
+  float result = raw_value;
+  
+  if (this->filter_config_.is_median_enabled() && this->raw_window_.is_full()) {
+    result = this->raw_window_.median();
+  }
+  
+  return result;
 }
 
 
