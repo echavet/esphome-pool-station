@@ -7,6 +7,7 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 - [From j5_ha_bridge to pool_station](#from-j5_ha_bridge-to-pool_station)
 - [From pool-firmata-wifi (lambda-heavy) to pool_station](#from-pool-firmata-wifi-to-pool_station)
 - [Entity ID Stability](#entity-id-stability)
+- [Calibration NVS key (v0.7.16)](#calibration-nvs-key-v0716)
 - [SENSOR-IDENTITY Checklist Before OTA](#sensor-identity-checklist-before-ota)
 
 ---
@@ -187,6 +188,32 @@ If you have history/statistics on old entity IDs:
 
 ---
 
+## Calibration NVS key (v0.7.16)
+
+Through v0.7.15, each channel's flash preferences key was
+`hash((component_id, channel_type)) & 0xFFFFFFFF`. Python's `hash()` is
+randomized per process (`PYTHONHASHSEED`), so a firmware recompile could
+write and later fail to find the same NVS slot.
+
+v0.7.16 uses a **deterministic MD5** (`ps-md5-v1:component_id:channel_type`).
+The old key cannot be reconstructed, so there is **no automatic migration**.
+
+After flashing 0.7.16:
+
+1. Turn on Calibration Mode
+2. Recapture (or re-enter) points for each channel
+3. Press Save
+4. Confirm `cal_invalid` is off and values match buffers / known references
+
+If the MD5 payload scheme is ever bumped again, treat it as another one-time
+recalibration — keep the scheme prefix versioned so a future dual-read
+migration is possible.
+
+Keep `pool_station.id` stable. Changing the component id still generates a
+new key and orphans saved calibration.
+
+---
+
 ## SENSOR-IDENTITY Checklist Before OTA
 
 **CRITICAL**: Before OTA updating to pool_station, verify your sensor identity configuration.
@@ -252,6 +279,8 @@ After OTA update:
 1. Check ESPHome logs for sensor registration
 2. Verify temperature readings match physical locations
 3. Confirm calibration data loaded from preferences
+   (flashing **0.7.16+** from ≤0.7.15 requires a one-time recapture — see
+   [Calibration NVS key](#calibration-nvs-key-v0716))
 4. Test calibration mode switch functionality
 
 ### Troubleshooting

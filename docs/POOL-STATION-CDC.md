@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.15 (Lot 7 — Capturer number codegen: no double register_component)  
+> Version: 0.7.16 (Lot 7 — Lot-2 review-fix ports: stable NVS key, slot-stable points)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 

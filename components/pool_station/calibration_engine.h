@@ -184,6 +184,10 @@ class CalibrationEngine {
   bool is_draft_valid() const;
   uint8_t get_minimum_points() const;
   uint8_t get_minimum_points_for_type(CalibrationType type) const;
+  // Stub algorithms (exponential/logarithmic/power) are not implemented.
+  // is_valid() is false for those types so cal_invalid reflects reality.
+  static bool is_type_implemented(CalibrationType type);
+  bool is_implemented() const { return is_type_implemented(this->type_); }
   
   // Main calibration function (uses LIVE points, not draft)
   float calibrate(float raw_voltage) const;
@@ -205,6 +209,13 @@ class CalibrationEngine {
   
   // Polynomial helper: least squares fit
   void compute_polynomial_coefficients_() const;
+
+  // Apply YAML precision_decimals_ to a calibrated value.
+  float apply_precision_(float value) const;
+
+  // Working copy of valid points. Sort only this copy (never live/draft slots).
+  std::vector<CalibrationPoint> valid_points_copy_(
+      const std::vector<CalibrationPoint> &src, bool sort_by_x) const;
   
   CalibrationType type_{CAL_TYPE_NONE};
   uint8_t polynomial_order_{2};
