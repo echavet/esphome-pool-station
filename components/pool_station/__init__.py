@@ -14,7 +14,6 @@ from esphome.const import (
     CONF_UPDATE_INTERVAL,
     CONF_ICON,
     CONF_ENTITY_CATEGORY,
-    CONF_DISABLED_BY_DEFAULT,
     ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_VOLT,
@@ -870,7 +869,11 @@ def generate_preferences_key(base_key, channel_type):
 
 
 async def setup_capturer_ui(config, parent_var, channel_var, channel_type, channel_key):
-    """Setup Capturer UI entities for a channel."""
+    """Setup Capturer UI entities for a channel.
+    
+    All dynamically created entities pass through ESPHome platform schemas
+    to ensure all required keys (disabled_by_default, mode, etc.) are present.
+    """
     capturer_conf = config.get(CONF_CAPTURER)
     if capturer_conf is None:
         return
@@ -878,18 +881,53 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     defaults = CHANNEL_DEFAULTS.get(channel_key, {})
     point_count = capturer_conf.get(CONF_POINT_COUNT, 3)
     
+    # Pre-create schemas with defaults for dynamic entities
+    # These schemas add all required entity keys (disabled_by_default, mode, etc.)
+    capture_btn_schema = button.button_schema(
+        CalibrationCaptureButton,
+        icon="mdi:crosshairs-gps",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+    )
+    save_btn_schema = button.button_schema(
+        CalibrationSaveButton,
+        icon="mdi:content-save",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+    )
+    point_x_schema = number.number_schema(
+        CalibrationPointXNumber,
+        icon="mdi:alpha-x-circle",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+        unit_of_measurement="V",
+    )
+    point_y_schema = number.number_schema(
+        CalibrationPointYNumber,
+        icon="mdi:alpha-y-circle",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+        unit_of_measurement=defaults.get("y_unit", ""),
+    )
+    dfrobot_mid_schema = number.number_schema(
+        DFRobotMidNumber,
+        icon="mdi:arrow-collapse-vertical",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+        unit_of_measurement="mV",
+    )
+    dfrobot_offset_schema = number.number_schema(
+        DFRobotOffsetNumber,
+        icon="mdi:delta",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+        unit_of_measurement="mV",
+    )
+    
     # Create capture buttons and point numbers for each point
     for point_idx in range(point_count):
         # Capture button (copies current raw to point X)
         if capturer_conf.get(CONF_CAPTURE_BUTTONS, True):
             btn_id = f"{channel_key}_capture_{point_idx}"
-            btn_conf = {
-                CONF_ID: cv.declare_id(CalibrationCaptureButton)(btn_id),
+            # Pass through schema to get all required defaults
+            btn_conf = capture_btn_schema({
+                CONF_ID: btn_id,
                 CONF_NAME: f"{channel_key.title()} Capture Point {point_idx + 1}",
-                CONF_ICON: "mdi:crosshairs-gps",
-                CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
-                CONF_DISABLED_BY_DEFAULT: False,
-            }
+            })
             btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
             await button.register_button(btn_var, btn_conf)
             cg.add(btn_var.set_parent(parent_var))
@@ -899,14 +937,11 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         # Point X number (raw voltage)
         if capturer_conf.get(CONF_POINT_NUMBERS, True):
             num_x_id = f"{channel_key}_point{point_idx}_x"
-            num_x_conf = {
-                CONF_ID: cv.declare_id(CalibrationPointXNumber)(num_x_id),
+            # Pass through schema to get all required defaults (mode, etc.)
+            num_x_conf = point_x_schema({
+                CONF_ID: num_x_id,
                 CONF_NAME: f"{channel_key.title()} Cal Point {point_idx + 1} X",
-                CONF_ICON: "mdi:alpha-x-circle",
-                CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
-                CONF_UNIT_OF_MEASUREMENT: "V",
-                CONF_DISABLED_BY_DEFAULT: False,
-            }
+            })
             num_x_var = cg.new_Pvariable(num_x_conf[CONF_ID])
             await number.register_number(
                 num_x_var, num_x_conf,
@@ -922,14 +957,11 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         # Point Y number (calibrated value)
         if capturer_conf.get(CONF_POINT_NUMBERS, True):
             num_y_id = f"{channel_key}_point{point_idx}_y"
-            num_y_conf = {
-                CONF_ID: cv.declare_id(CalibrationPointYNumber)(num_y_id),
+            # Pass through schema to get all required defaults
+            num_y_conf = point_y_schema({
+                CONF_ID: num_y_id,
                 CONF_NAME: f"{channel_key.title()} Cal Point {point_idx + 1} Y",
-                CONF_ICON: "mdi:alpha-y-circle",
-                CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
-                CONF_UNIT_OF_MEASUREMENT: defaults.get("y_unit", ""),
-                CONF_DISABLED_BY_DEFAULT: False,
-            }
+            })
             num_y_var = cg.new_Pvariable(num_y_conf[CONF_ID])
             await number.register_number(
                 num_y_var, num_y_conf,
@@ -945,13 +977,11 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     # Save button
     if capturer_conf.get(CONF_SAVE_BUTTON, True):
         save_id = f"{channel_key}_save_cal"
-        save_conf = {
-            CONF_ID: cv.declare_id(CalibrationSaveButton)(save_id),
+        # Pass through schema to get all required defaults
+        save_conf = save_btn_schema({
+            CONF_ID: save_id,
             CONF_NAME: f"{channel_key.title()} Save Calibration",
-            CONF_ICON: "mdi:content-save",
-            CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
-            CONF_DISABLED_BY_DEFAULT: False,
-        }
+        })
         save_var = cg.new_Pvariable(save_conf[CONF_ID])
         await button.register_button(save_var, save_conf)
         cg.add(save_var.set_parent(parent_var))
@@ -960,14 +990,11 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     # DFRobot mid_mv number (typically for ORP with dfrobot_orp calibration)
     if capturer_conf.get(CONF_MID_NUMBER, False):
         mid_id = f"{channel_key}_dfrobot_mid"
-        mid_conf = {
-            CONF_ID: cv.declare_id(DFRobotMidNumber)(mid_id),
+        # Pass through schema to get all required defaults
+        mid_conf = dfrobot_mid_schema({
+            CONF_ID: mid_id,
             CONF_NAME: f"{channel_key.title()} DFRobot Mid mV",
-            CONF_ICON: "mdi:arrow-collapse-vertical",
-            CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
-            CONF_UNIT_OF_MEASUREMENT: "mV",
-            CONF_DISABLED_BY_DEFAULT: False,
-        }
+        })
         mid_var = cg.new_Pvariable(mid_conf[CONF_ID])
         await number.register_number(
             mid_var, mid_conf,
@@ -982,14 +1009,11 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     # DFRobot offset_mv number
     if capturer_conf.get(CONF_OFFSET_NUMBER, False):
         offset_id = f"{channel_key}_dfrobot_offset"
-        offset_conf = {
-            CONF_ID: cv.declare_id(DFRobotOffsetNumber)(offset_id),
+        # Pass through schema to get all required defaults
+        offset_conf = dfrobot_offset_schema({
+            CONF_ID: offset_id,
             CONF_NAME: f"{channel_key.title()} DFRobot Offset mV",
-            CONF_ICON: "mdi:delta",
-            CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
-            CONF_UNIT_OF_MEASUREMENT: "mV",
-            CONF_DISABLED_BY_DEFAULT: False,
-        }
+        })
         offset_var = cg.new_Pvariable(offset_conf[CONF_ID])
         await number.register_number(
             offset_var, offset_conf,

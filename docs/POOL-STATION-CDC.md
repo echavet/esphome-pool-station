@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.3 (Lot 7 — Entity schema fix)  
+> Version: 0.7.4 (Lot 7 — Robust schema validation)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 
