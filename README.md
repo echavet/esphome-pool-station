@@ -459,7 +459,9 @@ capturer:
     name: "pH Algorithm"
 ```
 
-Creates a select entity with options: `none`, `linear`, `polynomial`, `piecewise`, `dfrobot_orp`.
+Creates a select entity. Options are **per-channel**:
+- **pressure / pH**: `none`, `linear`, `polynomial`, `piecewise`
+- **ORP**: the same list plus `dfrobot_orp`
 
 **Use case**: Switch from `linear` to `piecewise` after adding more calibration points.
 
