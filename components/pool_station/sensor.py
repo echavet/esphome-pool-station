@@ -1,6 +1,9 @@
 """
 ESPHome sensor platform for pool_station component.
-Exposes calibrated and raw sensor values for pH, ORP, pressure, temperature.
+Exposes calibrated and raw sensor values for pH, ORP, pressure.
+
+Lot 1: This file maintains backward compatibility with Lot 0 role-based sensors,
+but the preferred approach is now using channels in the main pool_station block.
 """
 
 import esphome.codegen as cg
@@ -27,7 +30,7 @@ from . import (
 
 DEPENDENCIES = ["pool_station"]
 
-# Sensor types
+# Legacy sensor class for backward compatibility with Lot 0
 PoolStationSensor = pool_station_ns.class_(
     "PoolStationSensor", sensor.Sensor, cg.Component
 )
@@ -48,9 +51,6 @@ SENSOR_ROLE = {
 # Configuration keys
 CONF_SENSOR_ROLE = "role"
 CONF_PARENT_ID = "pool_station_id"
-
-# Stub sensor (for Lot 0, exposes water_temperature)
-CONF_WATER_TEMPERATURE_SENSOR = "water_temperature"
 
 # Default sensor configurations by role
 SENSOR_DEFAULTS = {
@@ -73,8 +73,8 @@ SENSOR_DEFAULTS = {
         "icon": "mdi:thermometer",
     },
     "ph_raw": {
-        "unit": "mV",
-        "accuracy": 1,
+        "unit": "V",
+        "accuracy": 3,
         "device_class": None,
         "icon": "mdi:flask",
     },
@@ -85,8 +85,8 @@ SENSOR_DEFAULTS = {
         "icon": "mdi:ph",
     },
     "orp_raw": {
-        "unit": "mV",
-        "accuracy": 1,
+        "unit": "V",
+        "accuracy": 3,
         "device_class": None,
         "icon": "mdi:flash",
     },
@@ -97,8 +97,8 @@ SENSOR_DEFAULTS = {
         "icon": "mdi:flash",
     },
     "pressure_raw": {
-        "unit": "mV",
-        "accuracy": 1,
+        "unit": "V",
+        "accuracy": 3,
         "device_class": None,
         "icon": "mdi:gauge",
     },
@@ -121,23 +121,21 @@ def validate_sensor_role(value):
     return value
 
 
-# Sensor schema
+# Sensor schema (legacy Lot 0 style)
 SENSOR_SCHEMA = sensor.sensor_schema(
     PoolStationSensor,
     state_class=STATE_CLASS_MEASUREMENT,
-).extend(
-    {
-        cv.GenerateID(): cv.declare_id(PoolStationSensor),
-        cv.Required(CONF_PARENT_ID): cv.use_id(PoolStationComponent),
-        cv.Required(CONF_SENSOR_ROLE): validate_sensor_role,
-    }
-)
+).extend({
+    cv.GenerateID(): cv.declare_id(PoolStationSensor),
+    cv.Required(CONF_PARENT_ID): cv.use_id(PoolStationComponent),
+    cv.Required(CONF_SENSOR_ROLE): validate_sensor_role,
+})
 
 CONFIG_SCHEMA = SENSOR_SCHEMA
 
 
 async def to_code(config):
-    """Generate C++ code for pool_station sensor."""
+    """Generate C++ code for pool_station sensor (legacy)."""
     parent = await cg.get_variable(config[CONF_PARENT_ID])
     
     role_str = config[CONF_SENSOR_ROLE]

@@ -9,64 +9,81 @@ namespace pool_station {
 
 void PoolStationComponent::setup() {
   ESP_LOGI(TAG, "Setting up Pool Station component...");
-  ESP_LOGI(TAG, "  Update interval: %u ms", this->update_interval_);
-  ESP_LOGI(TAG, "  Calibration mode: %d", static_cast<int>(this->calibration_mode_));
+  ESP_LOGI(TAG, "  Update interval: %u ms", this->get_update_interval());
+  ESP_LOGI(TAG, "  Calibration interval: %u ms", this->calibration_interval_);
+  
+  if (this->calibration_mode_switch_ != nullptr) {
+    ESP_LOGI(TAG, "  Calibration mode switch: configured");
+  }
   
   if (this->water_temp_sensor_ != nullptr) {
     ESP_LOGI(TAG, "  Water temperature sensor: bound");
-  } else {
-    ESP_LOGD(TAG, "  Water temperature sensor: not configured");
   }
 
-  ESP_LOGI(TAG, "  Registered sensors: %zu", this->sensors_.size());
-  for (const auto &pair : this->sensors_) {
-    PoolStationSensor *sensor = pair.second;
-    if (sensor != nullptr) {
-      ESP_LOGI(TAG, "    - Role %d: %s", pair.first, sensor->get_role_name());
+  ESP_LOGI(TAG, "  Registered channels: %zu", this->channels_.size());
+  for (const auto &pair : this->channels_) {
+    PoolStationChannelSensor *channel = pair.second;
+    if (channel != nullptr) {
+      ESP_LOGI(TAG, "    - %s (type %d)", channel->get_channel_type_name(), pair.first);
     }
   }
 
+  ESP_LOGI(TAG, "  Legacy sensors: %zu", this->sensors_.size());
+  
   ESP_LOGI(TAG, "Pool Station setup complete.");
 }
 
-void PoolStationComponent::loop() {
-  uint32_t now = millis();
-  if (now - this->last_update_ < this->update_interval_) {
-    return;
-  }
-  this->last_update_ = now;
+void PoolStationComponent::update() {
+  ESP_LOGV(TAG, "Update cycle - calibration mode: %s", 
+           this->calibration_mode_active_ ? "ON" : "OFF");
 
-  this->update_sensors_();
+  if (this->water_temp_sensor_ != nullptr) {
+    float water_temp = this->get_water_temperature();
+    if (!std::isnan(water_temp)) {
+      ESP_LOGV(TAG, "  Water temperature: %.2f C", water_temp);
+    }
+  }
 }
 
 void PoolStationComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Pool Station Component:");
-  ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
+  ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->get_update_interval());
+  ESP_LOGCONFIG(TAG, "  Calibration interval: %u ms", this->calibration_interval_);
+  ESP_LOGCONFIG(TAG, "  Calibration mode: %s", this->calibration_mode_active_ ? "ON" : "OFF");
   
-  const char *cal_mode_str = "none";
-  switch (this->calibration_mode_) {
-    case CAL_MODE_LINEAR: cal_mode_str = "linear"; break;
-    case CAL_MODE_POLYNOMIAL: cal_mode_str = "polynomial"; break;
-    case CAL_MODE_EXPONENTIAL: cal_mode_str = "exponential"; break;
-    case CAL_MODE_LOGARITHMIC: cal_mode_str = "logarithmic"; break;
-    case CAL_MODE_POWER: cal_mode_str = "power"; break;
-    case CAL_MODE_PIECEWISE: cal_mode_str = "piecewise"; break;
-    case CAL_MODE_DFROBOT_ORP: cal_mode_str = "dfrobot_orp"; break;
-    default: cal_mode_str = "none"; break;
+  if (this->calibration_mode_switch_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Calibration mode switch: configured");
   }
-  ESP_LOGCONFIG(TAG, "  Calibration mode: %s", cal_mode_str);
   
   if (this->water_temp_sensor_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Water temperature sensor: configured");
   }
   
-  ESP_LOGCONFIG(TAG, "  Registered sensors:");
-  for (const auto &pair : this->sensors_) {
-    PoolStationSensor *sensor = pair.second;
-    if (sensor != nullptr) {
-      ESP_LOGCONFIG(TAG, "    - %s (role %d)", sensor->get_role_name(), pair.first);
+  ESP_LOGCONFIG(TAG, "  Channels:");
+  for (const auto &pair : this->channels_) {
+    PoolStationChannelSensor *channel = pair.second;
+    if (channel != nullptr) {
+      ESP_LOGCONFIG(TAG, "    - %s", channel->get_channel_type_name());
     }
   }
+}
+
+void PoolStationComponent::set_calibration_mode_switch(CalibrationModeSwitch *sw) {
+  this->calibration_mode_switch_ = sw;
+}
+
+void PoolStationComponent::register_channel(PoolStationChannelSensor *channel, uint8_t type) {
+  if (channel == nullptr) {
+    ESP_LOGW(TAG, "Attempted to register null channel for type %d", type);
+    return;
+  }
+  
+  if (this->channels_.count(type) > 0) {
+    ESP_LOGW(TAG, "Channel type %d already registered, replacing", type);
+  }
+  
+  this->channels_[type] = channel;
+  ESP_LOGD(TAG, "Registered channel for type %d: %s", type, channel->get_channel_type_name());
 }
 
 void PoolStationComponent::register_sensor(PoolStationSensor *sensor, uint8_t role) {
@@ -90,31 +107,145 @@ float PoolStationComponent::get_water_temperature() const {
   return this->water_temp_sensor_->state;
 }
 
-void PoolStationComponent::update_sensors_() {
-  // Lot 0: Stub implementation
-  // In future lots, this will:
-  // 1. Read raw values from ADS1115/Dallas/GPIO sensors
-  // 2. Apply calibration algorithms
-  // 3. Run diagnostic checks (noise, jumps, drift)
-  // 4. Handle gated/campaign sampling
-  // 5. Publish calibrated values with diagnostics flags
-
-  ESP_LOGV(TAG, "Update cycle (stub) - %zu sensors registered", this->sensors_.size());
-
-  // Example: if water temperature is configured, log it
-  if (this->water_temp_sensor_ != nullptr) {
-    float water_temp = this->get_water_temperature();
-    if (!std::isnan(water_temp)) {
-      ESP_LOGV(TAG, "  Water temperature: %.2f C", water_temp);
-    }
+void PoolStationComponent::set_calibration_mode_active(bool active) {
+  if (this->calibration_mode_active_ != active) {
+    this->calibration_mode_active_ = active;
+    ESP_LOGI(TAG, "Calibration mode %s", active ? "ENABLED" : "DISABLED");
   }
-
-  // TODO Lot 1+: Actually read and process sensor values
-  // For now, sensors don't publish values in the stub
 }
 
+
 // ============================================================================
-// PoolStationSensor
+// CalibrationModeSwitch
+// ============================================================================
+
+void CalibrationModeSwitch::setup() {
+  ESP_LOGD(TAG, "Setting up Calibration Mode Switch");
+  
+  bool initial_state = false;
+  this->publish_state(initial_state);
+  
+  if (this->parent_ != nullptr) {
+    this->parent_->set_calibration_mode_active(initial_state);
+  }
+}
+
+void CalibrationModeSwitch::dump_config() {
+  LOG_SWITCH("", "Calibration Mode Switch", this);
+}
+
+void CalibrationModeSwitch::write_state(bool state) {
+  this->publish_state(state);
+  
+  if (this->parent_ != nullptr) {
+    this->parent_->set_calibration_mode_active(state);
+  }
+  
+  ESP_LOGI(TAG, "Calibration mode switched %s", state ? "ON" : "OFF");
+}
+
+
+// ============================================================================
+// PoolStationChannelSensor
+// ============================================================================
+
+void PoolStationChannelSensor::setup() {
+  ESP_LOGD(TAG, "Setting up Pool Station Channel: %s", this->get_channel_type_name());
+  
+  if (this->source_sensor_ == nullptr) {
+    ESP_LOGE(TAG, "Channel %s has no source sensor configured!", this->get_channel_type_name());
+    this->mark_failed();
+    return;
+  }
+  
+  this->source_sensor_->add_on_state_callback([this](float value) {
+    this->on_source_value_(value);
+  });
+  
+  ESP_LOGD(TAG, "Channel %s subscribed to source sensor", this->get_channel_type_name());
+}
+
+void PoolStationChannelSensor::loop() {
+}
+
+void PoolStationChannelSensor::dump_config() {
+  LOG_SENSOR("", "Pool Station Channel", this);
+  ESP_LOGCONFIG(TAG, "  Type: %s", this->get_channel_type_name());
+  ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->configured_interval_);
+  if (this->raw_sensor_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Raw sensor: configured");
+  }
+}
+
+const char *PoolStationChannelSensor::get_channel_type_name() const {
+  switch (this->channel_type_) {
+    case CHANNEL_TYPE_PRESSURE: return "pressure";
+    case CHANNEL_TYPE_PH: return "ph";
+    case CHANNEL_TYPE_ORP: return "orp";
+    default: return "unknown";
+  }
+}
+
+void PoolStationChannelSensor::on_source_value_(float value) {
+  uint32_t now = millis();
+  
+  uint32_t effective_interval = this->configured_interval_;
+  if (this->parent_ != nullptr && this->parent_->is_calibration_mode()) {
+    effective_interval = this->parent_->get_calibration_interval();
+  }
+  
+  if (now - this->last_update_ < effective_interval) {
+    return;
+  }
+  this->last_update_ = now;
+  
+  this->last_raw_value_ = value;
+  
+  if (this->raw_sensor_ != nullptr) {
+    this->raw_sensor_->publish_state(value);
+  }
+  
+  float calibrated = this->apply_calibration_(value);
+  this->last_calibrated_value_ = calibrated;
+  
+  this->publish_state(calibrated);
+  
+  ESP_LOGV(TAG, "Channel %s: raw=%.4f V, calibrated=%.2f", 
+           this->get_channel_type_name(), value, calibrated);
+}
+
+float PoolStationChannelSensor::apply_calibration_(float raw_voltage) {
+  switch (this->channel_type_) {
+    case CHANNEL_TYPE_PRESSURE: {
+      // Lot 1 stub: pass-through (real calibration in Lot 2)
+      // Example formula for 0-5V 0-10bar sensor (will be configurable):
+      // pressure_bar = (voltage / 5.0) * 10.0
+      // For now, pass-through voltage as placeholder
+      return raw_voltage;
+    }
+    
+    case CHANNEL_TYPE_PH: {
+      // Lot 1 stub: pass-through (real N-point calibration in Lot 2)
+      // pH electrodes typically output ~0-3V for pH 0-14
+      // Neutral pH 7.0 is around mid-scale voltage
+      return raw_voltage;
+    }
+    
+    case CHANNEL_TYPE_ORP: {
+      // Lot 1 stub: convert voltage to millivolts (ORP is often expressed in mV)
+      // Most ORP modules output 0-3V for -2000mV to +2000mV
+      // For now, convert V to mV as simple transform
+      return raw_voltage * 1000.0f;
+    }
+    
+    default:
+      return raw_voltage;
+  }
+}
+
+
+// ============================================================================
+// PoolStationSensor (Legacy Lot 0 compatibility)
 // ============================================================================
 
 void PoolStationSensor::setup() {
@@ -142,12 +273,8 @@ const char *PoolStationSensor::get_role_name() const {
 }
 
 void PoolStationSensor::publish_value(float value) {
-  // TODO Lot 1+: Apply calibration before publishing
-  // TODO Lot 3+: Apply filters (filter_samples, max_jump, streak, min/max)
-  // TODO Lot 4+: Run diagnostics and set flags
-  
   this->last_raw_value_ = value;
-  this->last_calibrated_value_ = value;  // No calibration in Lot 0
+  this->last_calibrated_value_ = value;  // No calibration in Lot 1 legacy mode
   
   this->publish_state(value);
 }
