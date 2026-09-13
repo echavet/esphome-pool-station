@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.13 (Lot 7 — Per-channel algorithm select options)  
+> Version: 0.7.14 (Lot 7 — Capturer UI sync after add/remove)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 

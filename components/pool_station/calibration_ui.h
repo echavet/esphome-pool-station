@@ -173,6 +173,8 @@ class CalibrationInvalidSensor : public binary_sensor::BinarySensor, public Comp
   void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
   void set_channel_type(uint8_t type) { this->channel_type_ = type; }
 
+  void update_from_calibration();
+
  protected:
   PoolStationComponent *parent_{nullptr};
   uint8_t channel_type_{0};
@@ -345,6 +347,8 @@ class DraftPendingSensor : public binary_sensor::BinarySensor, public Component 
   
   void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
   void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+  void update_from_calibration();
 
  protected:
   PoolStationComponent *parent_{nullptr};

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.14] - 2026-09-13
+
+### Fixed — Add/Remove Calibration Point Has No HA UI Effect
+
+#### HIGH: `pression_add_point` / `pression_remove_point` change the engine but HA numbers stay stale
+- **Symptoms**: ESP log shows `Added new calibration point for channel 0 (total: 4)` but Home Assistant still has 3 `number.*_pressure_cal_point_*` entities; values often stay `unknown`; no `point_count` entity
+- **Root cause 1**: `PoolStationChannelSensor::notify_calibration_updated()` was a stub (log only). Add/Remove/Save/capture/algo/commit/discard never refreshed registered `CalibrationPointX/YNumber`, `CalibrationAlgorithmSelect`, `CalibrationPointCountNumber`, `cal_invalid`, or `draft_pending`
+- **Root cause 2**: `capturer.point_count` is the **max preallocated HA slots** codegen'd at compile time. Deploy YAML with `point_count: 3` cannot show a 4th point. `point_count_number` (live engine count) was not registered on the parent and is optional in schema
+- **Fix**:
+  - `notify_calibration_updated()` calls `PoolStationComponent::refresh_calibration_ui()` which republishes all registered widgets for that channel
+  - Codegen registers `algorithm_select`, `point_count_number`, and `draft_pending` on the parent (point X/Y were already registered)
+  - Channel `setup()` refreshes UI after `load_from_preferences()` so numbers are not stuck `unknown` when they setup before prefs load
+  - Save also notifies so HA stays in sync
+- **Docs**: `point_count` = max HA slots (recommend 5–10 with add/remove); `point_count_number` = live engine count. Example YAML uses `point_count: 5` plus `point_count_number`
+- Based on main after PR #22 (v0.7.13 per-channel algorithm select options)
+
+---
+
 ## [0.7.13] - 2026-09-13
 
 ### Fixed — Algorithm Select Options Are Per-Channel
@@ -733,7 +751,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.13** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.14** | ✅ **HA polish, runtime algo select, draft/commit, Capturer UI sync** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

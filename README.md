@@ -41,7 +41,8 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 **Lot 7** — HA Polish + Migration Docs:
 - ✅ **Runtime algorithm select**: Change calibration type from HA without reflash
 - ✅ **Add/remove calibration points**: Dynamic point management from UI
-- ✅ **Point count number**: Resize calibration points (1-10)
+- ✅ **Point count number**: Live engine count + optional resize (1-10)
+- ✅ **Capturer UI sync**: Add/Remove/Save/capture/algo refresh HA numbers (v0.7.14)
 - ✅ **Draft/Commit workflow**: Edit draft, preview, then commit or discard
 - ✅ **Draft pending sensor**: Shows when uncommitted changes exist
 - ✅ **Migration documentation**: From j5_ha_bridge and pool-firmata-wifi
@@ -140,10 +141,12 @@ pool_station:
       
       # Capturer UI for Home Assistant
       capturer:
-        point_count: 3
+        point_count: 5          # Max HA slots; add/remove cannot exceed this
         capture_buttons: true
         point_numbers: true
         save_button: true
+        point_count_number:
+          name: "pH Point Count"
       
       cal_invalid:
         name: "pH Cal Invalid"
@@ -283,12 +286,15 @@ channels:
       offset_mv: 0.0
     
     capturer:                   # Capturer UI configuration
-      point_count: 3            # Number of calibration points (1-10)
-      capture_buttons: true     # Create capture buttons per point
-      point_numbers: true       # Create x/y number entities per point
+      point_count: 5            # Max preallocated HA slots (1-10). Recommend 5–10
+                                # if using add/remove. Cannot create entities past this.
+      capture_buttons: true     # Create capture buttons per point slot
+      point_numbers: true       # Create x/y number entities per slot
       save_button: true         # Create save to flash button
       mid_number: false         # DFRobot mid_mv number entity
       offset_number: false      # DFRobot offset_mv number entity
+      point_count_number:       # Live CalibrationEngine count (not the slot max)
+        name: "pH Point Count"
     
     cal_invalid:                # Calibration invalid indicator
       name: "pH Cal Invalid"
@@ -471,17 +477,19 @@ Dynamic point management from the UI:
 
 ```yaml
 capturer:
+  point_count: 5                 # Max preallocated HA slots (recommend 5–10)
   add_point_button:
     name: "pH Add Point"
   remove_point_button:
     name: "pH Remove Point"
   point_count_number:
-    name: "pH Point Count"
+    name: "pH Point Count"       # Live engine count
 ```
 
-- **add_point_button**: Adds a new calibration point (x=0, y=0)
-- **remove_point_button**: Removes the last point
-- **point_count_number**: Resize to exact count (1-10)
+- **point_count**: Compile-time **max HA slots** for `cal_point_*` numbers/buttons (1-10). Add/remove **cannot** create new Home Assistant entities beyond this. Recommend 5–10 when using add/remove.
+- **add_point_button**: Adds a new calibration point in the engine (x=0, y=0). Existing slots refresh; a 4th point only appears in HA if `point_count >= 4`.
+- **remove_point_button**: Removes the last engine point and refreshes remaining slots (unused slots publish `unknown`/NaN).
+- **point_count_number**: Live `CalibrationEngine` count (and optional resize 1-10). This is **not** the same as `point_count` slots.
 
 ### Draft/Commit Workflow
 

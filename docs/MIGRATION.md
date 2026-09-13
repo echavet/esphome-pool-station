@@ -116,10 +116,12 @@ pool_station:
       
       # Capturer UI for runtime calibration editing
       capturer:
-        point_count: 3
+        point_count: 5   # Max HA slots (recommend 5–10 if using add/remove)
         capture_buttons: true
         point_numbers: true
         save_button: true
+        point_count_number:
+          name: "pH Point Count"   # Live engine count
 ```
 
 ### Benefits of Migration
