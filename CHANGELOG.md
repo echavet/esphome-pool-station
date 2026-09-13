@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.15] - 2026-09-13
+
+### Fixed — Capturer Number Codegen Double-Registers Component
+
+#### CRIT: `esphome config` ValueError after v0.7.14
+- **Error**: `ValueError: Component ID pressure_point0_x was not declared to inherit from Component, or was registered twice.` at `setup_capturer_ui` → `cg.register_component(num_x_var, num_x_conf)`
+- **Root cause**: v0.7.14 called `cg.register_component` on capturer point X/Y (and `point_count_number`). ESPHome 2026.4 `number.register_number` already registers the Component
+- **Fix**: drop the redundant `cg.register_component` on number entities. Keep parent/index setters before `register_number` so `setup()` still runs. Same cleanup on `number.py` helpers
+- **Preserved**: C++ `notify_calibration_updated()` / `publish_captured_point_x()` so Capture still writes volts onto the HA X number
+- Algorithm select still uses `register_component` + `register_select` (needed since v0.7.12; `register_select` does not double-register)
+
+---
+
 ## [0.7.14] - 2026-09-13
 
 ### Fixed — Add/Remove Calibration Point Has No HA UI Effect
@@ -755,7 +768,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.14** | ✅ **HA polish, runtime algo select, draft/commit, Capturer UI sync** | **Current** |
+| **7** | **0.7.15** | ✅ **HA polish, runtime algo select, draft/commit, Capturer UI sync** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)
