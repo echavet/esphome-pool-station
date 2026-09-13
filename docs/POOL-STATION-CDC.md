@@ -153,8 +153,8 @@
 | Lot | Contenu | Status |
 |-----|---------|--------|
 | 0 | Squelette, docs, sensor stub | ✅ Done |
-| **1** | ADS1115 binding, raw values, cal mode switch | ✅ Current |
-| 2 | N-point calibration, Capturer, persistence | Planned |
+| 1 | ADS1115 binding, raw values, cal mode switch | ✅ Done |
+| **2** | **N-point calibration, Capturer, persistence** | ✅ **Current** |
 | 3 | Filters (j5-like) | Planned |
 | 4 | Diagnostics (noise, jumps, drift) | Planned |
 | 5 | Water temp compensation | Planned |

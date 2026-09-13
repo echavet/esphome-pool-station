@@ -1,9 +1,10 @@
-# Pool Station — Minimal Example Configuration (Lot 1)
+# Pool Station — Minimal Example Configuration (Lot 2)
 # 
-# This configuration demonstrates the Lot 1 features:
-#   - Real ADS1115-backed channels (pressure, pH, ORP)
-#   - Raw voltage exposure as diagnostic sensors
-#   - Calibration mode switch for high-frequency sampling
+# This configuration demonstrates the Lot 2 features:
+#   - N-point calibration with multiple algorithms
+#   - Capturer UI for calibration from Home Assistant
+#   - Calibration persistence across reboots
+#   - cal_invalid indicator when calibration is insufficient
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -38,6 +39,8 @@ logger:
   level: INFO
   logs:
     pool_station: DEBUG
+    pool_station.cal: DEBUG
+    pool_station.ui: DEBUG
 
 # Enable Home Assistant API
 api:
@@ -150,7 +153,7 @@ sensor:
     id: air_local_temp
 
 # =============================================================================
-# Pool Station Component (Lot 1)
+# Pool Station Component (Lot 2)
 # =============================================================================
 pool_station:
   id: pool
@@ -166,7 +169,11 @@ pool_station:
 
   # Channels - compose native ADS1115 sensors
   channels:
-    # Pressure channel
+    # =========================================================================
+    # PRESSURE Channel
+    # Example: 0-5V output for 0-10 bar sensor
+    # Using LINEAR calibration with 2 points
+    # =========================================================================
     pressure:
       source_id: ads_pressure
       name: "Filter Pressure"
@@ -174,12 +181,36 @@ pool_station:
       accuracy_decimals: 2
       icon: "mdi:gauge"
       update_interval: 2s
+      
       # Raw voltage diagnostic sensor (always exposed)
       raw_sensor:
         name: "Filter Pressure Raw"
-        # Defaults: V, 3 decimals, diagnostic category
+      
+      # Calibration: linear 2-point
+      # Example: 0.5V = 0 bar, 4.5V = 10 bar
+      calibration:
+        type: linear
+        points:
+          - x: 0.5    # Volts at 0 bar
+            y: 0.0    # bar
+          - x: 4.5    # Volts at 10 bar
+            y: 10.0   # bar
+      
+      # Capturer UI - allows editing calibration from HA
+      capturer:
+        point_count: 2
+        capture_buttons: true
+        point_numbers: true
+        save_button: true
+      
+      # Calibration invalid indicator
+      cal_invalid:
+        name: "Pressure Cal Invalid"
 
-    # pH channel
+    # =========================================================================
+    # pH Channel
+    # Using PIECEWISE multi-point calibration (pH 4, 7, 10)
+    # =========================================================================
     ph:
       source_id: ads_ph
       name: "Pool pH"
@@ -187,10 +218,38 @@ pool_station:
       accuracy_decimals: 2
       icon: "mdi:ph"
       update_interval: 60s
+      
       raw_sensor:
         name: "Pool pH Raw"
+      
+      # Calibration: piecewise 3-point (pH 4, 7, 10 buffers)
+      # These are example values - replace with your actual calibration
+      calibration:
+        type: piecewise
+        precision: 2
+        points:
+          - x: 2.03   # Volts at pH 4.01
+            y: 4.01   # pH buffer 4
+          - x: 1.50   # Volts at pH 7.00
+            y: 7.00   # pH buffer 7
+          - x: 0.98   # Volts at pH 10.00
+            y: 10.00  # pH buffer 10
+      
+      # Capturer UI - 3 points for pH 4/7/10 calibration
+      capturer:
+        point_count: 3
+        capture_buttons: true
+        point_numbers: true
+        save_button: true
+      
+      cal_invalid:
+        name: "pH Cal Invalid"
 
-    # ORP channel
+    # =========================================================================
+    # ORP Channel
+    # Using DFROBOT_ORP algorithm (SEN0165-like mid/offset)
+    # Formula: ORP_mV = mid_mv - (V * 1000) - offset_mv
+    # =========================================================================
     orp:
       source_id: ads_orp
       name: "Pool ORP"
@@ -198,37 +257,82 @@ pool_station:
       accuracy_decimals: 0
       icon: "mdi:flash"
       update_interval: 60s
+      
       raw_sensor:
         name: "Pool ORP Raw"
+      
+      # Calibration: DFRobot SEN0165-like algorithm
+      # mid_mv: midpoint reference (typically 2500 for 2.5V VRef)
+      # offset_mv: calibration offset from known ORP solution
+      calibration:
+        type: dfrobot_orp
+        mid_mv: 2500.0
+        offset_mv: 0.0
+      
+      # Capturer UI - includes mid/offset numbers for DFRobot
+      capturer:
+        point_count: 1     # Can capture offset from known solution
+        capture_buttons: true
+        point_numbers: false  # Less useful for dfrobot_orp
+        save_button: true
+        mid_number: true      # Enable mid_mv adjustment
+        offset_number: true   # Enable offset_mv adjustment
+      
+      cal_invalid:
+        name: "ORP Cal Invalid"
 
   # Water temperature for future Tw compensation (Lot 5)
   water_temperature:
     sensor_id: water_temp
 
 # =============================================================================
-# Notes for Lot 1
+# HOW TO CALIBRATE FROM HOME ASSISTANT
 # =============================================================================
-# 
-# WHAT'S REAL:
-#   - ADS1115 source sensors read actual ADC values
-#   - Channels subscribe to source sensors and publish values
-#   - Raw voltage diagnostic sensors always expose true ADC readings
-#   - Calibration mode switch controls sampling frequency
-#   - Temperature sensors use explicit Dallas addresses (anti-swap)
 #
-# WHAT'S STUB (coming in later lots):
-#   - Calibration: currently pass-through (Lot 2 adds N-point algorithms)
-#   - ORP: converts V to mV but no real calibration
-#   - Pressure: pass-through voltage (needs formula configuration)
-#   - pH: pass-through voltage (needs N-point calibration)
-#   - Filters: no filtering applied (Lot 3)
-#   - Diagnostics: no noise/drift detection (Lot 4)
-#   - Temperature compensation: binding present but not used (Lot 5)
+# 1. TURN ON CALIBRATION MODE
+#    Toggle "Pool Calibration Mode" switch ON for fast 1s sampling.
 #
-# CALIBRATION MODE:
-#   Turn ON the "Pool Calibration Mode" switch when:
-#   - Performing pH/ORP calibration with reference solutions
-#   - Checking pressure sensor response
-#   This forces 1s sampling on all channels for responsive readings.
+# 2. CAPTURE CALIBRATION POINTS
+#    For pH calibration example:
+#    a) Immerse probe in pH 4 buffer solution
+#    b) Wait for stable reading on "Pool pH Raw" sensor
+#    c) Press "Ph Capture Point 1" button
+#    d) Set "Ph Cal Point 1 Y" to 4.01 (actual buffer value)
+#    e) Repeat with pH 7 buffer → capture point 2, set Y=7.00
+#    f) Repeat with pH 10 buffer → capture point 3, set Y=10.00
+#
+# 3. SAVE CALIBRATION
+#    Press "Ph Save Calibration" button to persist to flash.
+#    Calibration survives reboots.
+#
+# 4. CHECK CALIBRATION STATUS
+#    "Ph Cal Invalid" sensor shows ON if insufficient points for algorithm.
+#
+# 5. TURN OFF CALIBRATION MODE
+#    Toggle "Pool Calibration Mode" switch OFF to return to normal sampling.
+#
+# =============================================================================
+# CALIBRATION ALGORITHMS AVAILABLE
+# =============================================================================
+#
+# - linear: 2-point linear interpolation/extrapolation
+#   Needs: 2 points minimum
+#   Use for: pressure sensors, simple linear relationships
+#
+# - piecewise: Multi-point linear segments
+#   Needs: 2+ points
+#   Use for: pH sensors, non-linear but monotonic responses
+#
+# - polynomial: N-point polynomial regression
+#   Needs: order+1 points (e.g., order=2 needs 3 points)
+#   Use for: complex non-linear relationships
+#   Configure: order (1-5), precision
+#
+# - dfrobot_orp: SEN0165-like mid/offset formula
+#   Needs: 0 points (uses mid_mv and offset_mv params)
+#   Formula: ORP_mV = mid_mv - (V * 1000) - offset_mv
+#   Use for: DFRobot ORP modules or similar
+#
+# - exponential, logarithmic, power: TODO (not implemented yet)
 #
 # =============================================================================

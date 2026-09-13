@@ -1,0 +1,456 @@
+#include "calibration_engine.h"
+
+namespace esphome {
+namespace pool_station {
+
+const char *CalibrationEngine::get_type_name() const {
+  return calibration_type_name(this->type_);
+}
+
+void CalibrationEngine::add_point(float x, float y) {
+  if (this->points_.size() >= MAX_CALIBRATION_POINTS) {
+    ESP_LOGW(CAL_TAG, "Max calibration points (%d) reached, ignoring", MAX_CALIBRATION_POINTS);
+    return;
+  }
+  
+  CalibrationPoint pt;
+  pt.x = x;
+  pt.y = y;
+  this->points_.push_back(pt);
+  this->poly_coeffs_valid_ = false;
+  
+  // Keep points sorted by x for piecewise
+  std::sort(this->points_.begin(), this->points_.end(), CalibrationPoint::compare_by_x);
+  
+  ESP_LOGD(CAL_TAG, "Added calibration point: x=%.4f, y=%.4f (total: %zu)", x, y, this->points_.size());
+}
+
+void CalibrationEngine::set_point(size_t index, float x, float y) {
+  if (index >= this->points_.size()) {
+    ESP_LOGW(CAL_TAG, "Point index %zu out of range (size: %zu)", index, this->points_.size());
+    return;
+  }
+  
+  this->points_[index].x = x;
+  this->points_[index].y = y;
+  this->poly_coeffs_valid_ = false;
+  
+  // Re-sort after modification
+  std::sort(this->points_.begin(), this->points_.end(), CalibrationPoint::compare_by_x);
+  
+  ESP_LOGD(CAL_TAG, "Updated calibration point %zu: x=%.4f, y=%.4f", index, x, y);
+}
+
+void CalibrationEngine::remove_point(size_t index) {
+  if (index >= this->points_.size()) {
+    return;
+  }
+  
+  this->points_.erase(this->points_.begin() + index);
+  this->poly_coeffs_valid_ = false;
+  
+  ESP_LOGD(CAL_TAG, "Removed calibration point %zu (remaining: %zu)", index, this->points_.size());
+}
+
+void CalibrationEngine::clear_points() {
+  this->points_.clear();
+  this->poly_coeffs_valid_ = false;
+  
+  ESP_LOGD(CAL_TAG, "Cleared all calibration points");
+}
+
+CalibrationPoint CalibrationEngine::get_point(size_t index) const {
+  if (index >= this->points_.size()) {
+    return CalibrationPoint();  // Returns invalid point (NAN values)
+  }
+  return this->points_[index];
+}
+
+void CalibrationEngine::set_seed_points(const std::vector<CalibrationPoint> &points) {
+  this->points_ = points;
+  this->poly_coeffs_valid_ = false;
+  
+  // Sort by x
+  std::sort(this->points_.begin(), this->points_.end(), CalibrationPoint::compare_by_x);
+  
+  ESP_LOGD(CAL_TAG, "Set %zu seed calibration points", this->points_.size());
+}
+
+uint8_t CalibrationEngine::get_minimum_points() const {
+  switch (this->type_) {
+    case CAL_TYPE_NONE:
+      return 0;
+    case CAL_TYPE_LINEAR:
+      return 2;
+    case CAL_TYPE_POLYNOMIAL:
+      // Polynomial of order N needs N+1 points minimum
+      return this->polynomial_order_ + 1;
+    case CAL_TYPE_PIECEWISE:
+      return 2;  // At least 2 points for one segment
+    case CAL_TYPE_DFROBOT_ORP:
+      return 0;  // Uses mid/offset, points are optional for offset calc
+    case CAL_TYPE_EXPONENTIAL:
+    case CAL_TYPE_LOGARITHMIC:
+    case CAL_TYPE_POWER:
+      return 2;  // TODO: implement these
+    default:
+      return 0;
+  }
+}
+
+bool CalibrationEngine::is_valid() const {
+  if (this->type_ == CAL_TYPE_NONE) {
+    return false;
+  }
+  
+  if (this->type_ == CAL_TYPE_DFROBOT_ORP) {
+    // DFRobot ORP is always valid (uses mid/offset params)
+    return true;
+  }
+  
+  // Check minimum points
+  uint8_t min_pts = this->get_minimum_points();
+  if (this->points_.size() < min_pts) {
+    return false;
+  }
+  
+  // Check all points are valid
+  for (const auto &pt : this->points_) {
+    if (!pt.is_valid()) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+float CalibrationEngine::calibrate(float raw_voltage) const {
+  if (std::isnan(raw_voltage)) {
+    return NAN;
+  }
+  
+  switch (this->type_) {
+    case CAL_TYPE_NONE:
+      return raw_voltage;  // Pass-through
+      
+    case CAL_TYPE_LINEAR:
+      return this->calibrate_linear_(raw_voltage);
+      
+    case CAL_TYPE_POLYNOMIAL:
+      return this->calibrate_polynomial_(raw_voltage);
+      
+    case CAL_TYPE_PIECEWISE:
+      return this->calibrate_piecewise_(raw_voltage);
+      
+    case CAL_TYPE_DFROBOT_ORP:
+      return this->calibrate_dfrobot_orp_(raw_voltage);
+      
+    case CAL_TYPE_EXPONENTIAL:
+    case CAL_TYPE_LOGARITHMIC:
+    case CAL_TYPE_POWER:
+      // TODO: implement these algorithms
+      ESP_LOGW(CAL_TAG, "Calibration type '%s' not yet implemented, using pass-through",
+               this->get_type_name());
+      return raw_voltage;
+      
+    default:
+      return raw_voltage;
+  }
+}
+
+float CalibrationEngine::calibrate_linear_(float x) const {
+  if (this->points_.size() < 2) {
+    ESP_LOGW(CAL_TAG, "Linear calibration needs 2 points, have %zu", this->points_.size());
+    return x;
+  }
+  
+  // Use first and last points for linear
+  const CalibrationPoint &p1 = this->points_.front();
+  const CalibrationPoint &p2 = this->points_.back();
+  
+  if (std::abs(p2.x - p1.x) < 1e-9f) {
+    ESP_LOGW(CAL_TAG, "Linear calibration: points have same x value");
+    return p1.y;
+  }
+  
+  // y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+  float slope = (p2.y - p1.y) / (p2.x - p1.x);
+  float result = p1.y + (x - p1.x) * slope;
+  
+  return result;
+}
+
+float CalibrationEngine::calibrate_polynomial_(float x) const {
+  if (!this->poly_coeffs_valid_) {
+    this->compute_polynomial_coefficients_();
+  }
+  
+  if (this->poly_coeffs_.empty()) {
+    ESP_LOGW(CAL_TAG, "Polynomial coefficients not computed");
+    return x;
+  }
+  
+  // Evaluate polynomial: y = c0 + c1*x + c2*x^2 + ... + cn*x^n
+  float result = 0.0f;
+  float x_power = 1.0f;
+  
+  for (size_t i = 0; i < this->poly_coeffs_.size(); i++) {
+    result += this->poly_coeffs_[i] * x_power;
+    x_power *= x;
+  }
+  
+  return result;
+}
+
+void CalibrationEngine::compute_polynomial_coefficients_() const {
+  this->poly_coeffs_.clear();
+  this->poly_coeffs_valid_ = false;
+  
+  size_t n = this->points_.size();
+  uint8_t order = this->polynomial_order_;
+  
+  if (n < order + 1) {
+    ESP_LOGW(CAL_TAG, "Polynomial order %d needs %d points, have %zu", order, order + 1, n);
+    return;
+  }
+  
+  // Limit order to prevent numerical instability
+  if (order > 5) {
+    ESP_LOGW(CAL_TAG, "Polynomial order %d too high, limiting to 5", order);
+    order = 5;
+  }
+  
+  size_t terms = order + 1;
+  
+  // Build normal equations for least squares: (X^T * X) * coeffs = X^T * y
+  // Using Gaussian elimination for simplicity
+  
+  // Compute X^T * X matrix and X^T * y vector
+  std::vector<std::vector<float>> matrix(terms, std::vector<float>(terms + 1, 0.0f));
+  
+  for (size_t i = 0; i < terms; i++) {
+    for (size_t j = 0; j < terms; j++) {
+      float sum = 0.0f;
+      for (size_t k = 0; k < n; k++) {
+        float xi = this->points_[k].x;
+        sum += std::pow(xi, (float)(i + j));
+      }
+      matrix[i][j] = sum;
+    }
+    
+    // X^T * y
+    float sum = 0.0f;
+    for (size_t k = 0; k < n; k++) {
+      float xi = this->points_[k].x;
+      float yi = this->points_[k].y;
+      sum += yi * std::pow(xi, (float)i);
+    }
+    matrix[i][terms] = sum;
+  }
+  
+  // Gaussian elimination with partial pivoting
+  for (size_t col = 0; col < terms; col++) {
+    // Find pivot
+    size_t max_row = col;
+    float max_val = std::abs(matrix[col][col]);
+    for (size_t row = col + 1; row < terms; row++) {
+      if (std::abs(matrix[row][col]) > max_val) {
+        max_val = std::abs(matrix[row][col]);
+        max_row = row;
+      }
+    }
+    
+    if (max_val < 1e-10f) {
+      ESP_LOGW(CAL_TAG, "Polynomial matrix is singular, cannot solve");
+      return;
+    }
+    
+    // Swap rows
+    if (max_row != col) {
+      std::swap(matrix[col], matrix[max_row]);
+    }
+    
+    // Eliminate
+    for (size_t row = col + 1; row < terms; row++) {
+      float factor = matrix[row][col] / matrix[col][col];
+      for (size_t j = col; j <= terms; j++) {
+        matrix[row][j] -= factor * matrix[col][j];
+      }
+    }
+  }
+  
+  // Back substitution
+  this->poly_coeffs_.resize(terms, 0.0f);
+  for (int i = (int)terms - 1; i >= 0; i--) {
+    float sum = matrix[i][terms];
+    for (size_t j = i + 1; j < terms; j++) {
+      sum -= matrix[i][j] * this->poly_coeffs_[j];
+    }
+    this->poly_coeffs_[i] = sum / matrix[i][i];
+  }
+  
+  this->poly_coeffs_valid_ = true;
+  
+  ESP_LOGD(CAL_TAG, "Computed polynomial coefficients (order %d):", order);
+  for (size_t i = 0; i < this->poly_coeffs_.size(); i++) {
+    ESP_LOGD(CAL_TAG, "  c%zu = %.6f", i, this->poly_coeffs_[i]);
+  }
+}
+
+float CalibrationEngine::calibrate_piecewise_(float x) const {
+  if (this->points_.size() < 2) {
+    ESP_LOGW(CAL_TAG, "Piecewise calibration needs at least 2 points, have %zu", this->points_.size());
+    return x;
+  }
+  
+  // Points are sorted by x
+  // Find the segment containing x
+  
+  // Below first point: extrapolate from first segment
+  if (x <= this->points_.front().x) {
+    const CalibrationPoint &p1 = this->points_[0];
+    const CalibrationPoint &p2 = this->points_[1];
+    float slope = (p2.y - p1.y) / (p2.x - p1.x);
+    return p1.y + (x - p1.x) * slope;
+  }
+  
+  // Above last point: extrapolate from last segment
+  if (x >= this->points_.back().x) {
+    size_t n = this->points_.size();
+    const CalibrationPoint &p1 = this->points_[n - 2];
+    const CalibrationPoint &p2 = this->points_[n - 1];
+    float slope = (p2.y - p1.y) / (p2.x - p1.x);
+    return p2.y + (x - p2.x) * slope;
+  }
+  
+  // Find segment [i, i+1] where points_[i].x <= x < points_[i+1].x
+  for (size_t i = 0; i < this->points_.size() - 1; i++) {
+    const CalibrationPoint &p1 = this->points_[i];
+    const CalibrationPoint &p2 = this->points_[i + 1];
+    
+    if (x >= p1.x && x <= p2.x) {
+      if (std::abs(p2.x - p1.x) < 1e-9f) {
+        return p1.y;
+      }
+      float slope = (p2.y - p1.y) / (p2.x - p1.x);
+      return p1.y + (x - p1.x) * slope;
+    }
+  }
+  
+  // Fallback (shouldn't reach here)
+  return x;
+}
+
+float CalibrationEngine::calibrate_dfrobot_orp_(float x) const {
+  // DFRobot SEN0165-like formula:
+  // ORP_mV = (mid_mv - (raw_voltage * 1000)) - offset_mv
+  //
+  // mid_mv: reference midpoint (typically 2500mV for 2.5V VRef)
+  // raw_voltage: from ADC (0-5V range typically)
+  // offset_mv: calibration offset from known ORP solution
+  
+  float raw_mv = x * 1000.0f;
+  float orp_mv = (this->dfrobot_mid_mv_ - raw_mv) - this->dfrobot_offset_mv_;
+  
+  return orp_mv;
+}
+
+void CalibrationEngine::load_from_preferences() {
+  if (this->prefs_key_ == 0) {
+    ESP_LOGD(CAL_TAG, "No preferences key set, skipping load");
+    return;
+  }
+  
+  this->prefs_ = global_preferences->make_preference<CalibrationPrefsData>(this->prefs_key_);
+  
+  CalibrationPrefsData data;
+  if (!this->prefs_.load(&data)) {
+    ESP_LOGD(CAL_TAG, "No saved calibration preferences found");
+    return;
+  }
+  
+  if (data.magic != CALIBRATION_PREFS_MAGIC) {
+    ESP_LOGD(CAL_TAG, "Invalid calibration preferences magic (0x%08X), ignoring", data.magic);
+    return;
+  }
+  
+  // Restore calibration type
+  this->type_ = static_cast<CalibrationType>(data.calibration_type);
+  
+  // Restore DFRobot params
+  this->dfrobot_mid_mv_ = data.dfrobot_mid_mv;
+  this->dfrobot_offset_mv_ = data.dfrobot_offset_mv;
+  
+  // Restore points
+  this->points_.clear();
+  for (uint8_t i = 0; i < data.point_count && i < MAX_CALIBRATION_POINTS; i++) {
+    CalibrationPoint pt;
+    pt.x = data.points_x[i];
+    pt.y = data.points_y[i];
+    if (pt.is_valid()) {
+      this->points_.push_back(pt);
+    }
+  }
+  
+  // Sort by x
+  std::sort(this->points_.begin(), this->points_.end(), CalibrationPoint::compare_by_x);
+  
+  this->poly_coeffs_valid_ = false;
+  
+  ESP_LOGI(CAL_TAG, "Loaded calibration from preferences: type=%s, %zu points",
+           this->get_type_name(), this->points_.size());
+}
+
+void CalibrationEngine::save_to_preferences() {
+  if (this->prefs_key_ == 0) {
+    ESP_LOGW(CAL_TAG, "No preferences key set, cannot save");
+    return;
+  }
+  
+  CalibrationPrefsData data;
+  data.magic = CALIBRATION_PREFS_MAGIC;
+  data.calibration_type = static_cast<uint8_t>(this->type_);
+  data.dfrobot_mid_mv = this->dfrobot_mid_mv_;
+  data.dfrobot_offset_mv = this->dfrobot_offset_mv_;
+  
+  data.point_count = std::min((size_t)MAX_CALIBRATION_POINTS, this->points_.size());
+  for (uint8_t i = 0; i < data.point_count; i++) {
+    data.points_x[i] = this->points_[i].x;
+    data.points_y[i] = this->points_[i].y;
+  }
+  
+  // Zero out unused slots
+  for (uint8_t i = data.point_count; i < MAX_CALIBRATION_POINTS; i++) {
+    data.points_x[i] = NAN;
+    data.points_y[i] = NAN;
+  }
+  
+  this->prefs_.save(&data);
+  
+  ESP_LOGI(CAL_TAG, "Saved calibration to preferences: type=%s, %d points",
+           this->get_type_name(), data.point_count);
+}
+
+void CalibrationEngine::dump_config() const {
+  ESP_LOGCONFIG(CAL_TAG, "  Calibration type: %s", this->get_type_name());
+  ESP_LOGCONFIG(CAL_TAG, "  Calibration valid: %s", this->is_valid() ? "YES" : "NO");
+  ESP_LOGCONFIG(CAL_TAG, "  Point count: %zu (min required: %d)", 
+                this->points_.size(), this->get_minimum_points());
+  
+  if (this->type_ == CAL_TYPE_POLYNOMIAL) {
+    ESP_LOGCONFIG(CAL_TAG, "  Polynomial order: %d", this->polynomial_order_);
+  }
+  
+  if (this->type_ == CAL_TYPE_DFROBOT_ORP) {
+    ESP_LOGCONFIG(CAL_TAG, "  DFRobot mid_mv: %.1f", this->dfrobot_mid_mv_);
+    ESP_LOGCONFIG(CAL_TAG, "  DFRobot offset_mv: %.1f", this->dfrobot_offset_mv_);
+  }
+  
+  for (size_t i = 0; i < this->points_.size(); i++) {
+    const CalibrationPoint &pt = this->points_[i];
+    ESP_LOGCONFIG(CAL_TAG, "  Point %zu: x=%.4f, y=%.4f", i, pt.x, pt.y);
+  }
+}
+
+}  // namespace pool_station
+}  // namespace esphome
