@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-13
+
+### Added — Lot 2: N-Point Calibration & Capturer UI
+
+#### Calibration Engine
+- New `CalibrationEngine` class in separate module (`calibration_engine.h/cpp`)
+- N-point calibration support (1 to 10 points per channel)
+- Multiple calibration algorithms:
+  - **linear**: 2-point linear interpolation/extrapolation
+  - **piecewise**: Multi-point linear segments between adjacent points
+  - **polynomial**: Least-squares polynomial regression (order 1-5)
+  - **dfrobot_orp**: SEN0165-like mid/offset formula for ORP sensors
+  - **exponential, logarithmic, power**: Stubs with TODO (not yet implemented)
+
+#### Capturer UI (Home Assistant Integration)
+- **Capture Buttons** (`CalibrationCaptureButton`): Press to copy current raw voltage into calibration point X
+- **Point X Numbers** (`CalibrationPointXNumber`): Edit raw voltage value of each calibration point
+- **Point Y Numbers** (`CalibrationPointYNumber`): Edit calibrated value of each calibration point
+- **Save Button** (`CalibrationSaveButton`): Persist calibration to flash storage
+- **DFRobot Mid Number** (`DFRobotMidNumber`): Adjust mid_mv parameter for dfrobot_orp algorithm
+- **DFRobot Offset Number** (`DFRobotOffsetNumber`): Adjust offset_mv parameter for dfrobot_orp algorithm
+
+#### Calibration Persistence
+- Calibration data persists to flash via ESPHome preferences
+- Automatically loads on boot
+- YAML seed points provide initial calibration, overridable at runtime
+- Save button commits runtime changes to flash
+
+#### Validation & Feedback
+- `CalibrationInvalidSensor` (`cal_invalid` binary_sensor): Indicates when calibration is insufficient
+- Minimum point validation per algorithm type
+- Graceful fallback to pass-through when calibration invalid
+- Enhanced logging with tags `pool_station`, `pool_station.cal`, `pool_station.ui`
+
+#### YAML Configuration
+- New `calibration` block per channel:
+  - `type`: Calibration algorithm selection
+  - `order`: Polynomial order (1-5)
+  - `precision`: Output decimal precision
+  - `points`: Seed calibration points (x, y pairs)
+  - `mid_mv`, `offset_mv`: DFRobot ORP specific parameters
+- New `capturer` block per channel:
+  - `point_count`: Number of calibration points (1-10)
+  - `capture_buttons`: Enable/disable capture buttons
+  - `point_numbers`: Enable/disable x/y number entities
+  - `save_button`: Enable/disable save button
+  - `mid_number`, `offset_number`: Enable DFRobot parameter numbers
+- New `cal_invalid` binary_sensor per channel
+
+### Changed
+- `PoolStationChannelSensor` now integrates `CalibrationEngine`
+- `apply_calibration_()` delegates to engine instead of inline stub code
+- Updated Python codegen (`__init__.py`) with calibration and capturer schema
+- AUTO_LOAD now includes `number`, `button`, `binary_sensor` platforms
+- Example YAML demonstrates full Lot 2 calibration workflow
+- README updated with calibration documentation and step-by-step guide
+
+### Technical Notes
+- Preferences key generated from component ID hash + channel type
+- Polynomial regression uses Gaussian elimination with partial pivoting
+- Piecewise calibration extrapolates beyond endpoint segments
+- DFRobot formula: `ORP_mV = mid_mv - (V × 1000) - offset_mv`
+
+---
+
 ## [0.1.0] - 2026-09-13
 
 ### Added — Lot 1: ADS1115 Channel Binding
@@ -95,10 +160,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Lot | Version | Content | Status |
 |-----|---------|---------|--------|
 | 0 | 0.0.1 | ✅ Skeleton, docs | Done |
-| 1 | 0.1.0 | ✅ ADS1115 binding, raw values, calibration mode | Current |
-| 2 | 0.2.0 | N-point calibration, Capturer, persistence | Planned |
+| 1 | 0.1.0 | ✅ ADS1115 binding, raw values, calibration mode | Done |
+| **2** | **0.2.0** | ✅ **N-point calibration, Capturer UI, persistence** | **Current** |
 | 3 | 0.3.0 | Filters (j5-like) | Planned |
 | 4 | 0.4.0 | Diagnostics | Planned |
 | 5 | 0.5.0 | Temperature compensation | Planned |
 | 6 | 0.6.0 | Gates/campaigns | Planned |
 | 7 | 1.0.0 | HA polish, stable release | Planned |
+
+## Future Lots (Lot 7 candidates)
+
+The following features are documented for potential inclusion in Lot 7 or later:
+
+- **Algorithm selection at runtime**: Select entity to change calibration type from HA
+- **Add/remove point buttons**: Dynamic point management from HA UI
+- **Draft/commit workflow**: Preview calibration changes before applying

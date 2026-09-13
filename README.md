@@ -9,10 +9,12 @@
 
 ## Vision
 
-- **Rich N-point calibration** with multiple algorithms: linear, polynomial, exponential, logarithmic, power, piecewise, dfrobot_orp (SEN0165-like mid/offset)
-- **Real-time diagnostics**: noise detection, jump detection, drift monitoring, diagnostic flags
-- **Gated/campaign sampling**: e.g., filtration OFF for 60s then measure pH/ORP; compare chlorine ON/OFF
-- **Water temperature compensation**: calibration and measurements compensated for Tw
+- **Rich N-point calibration** with multiple algorithms: linear, polynomial, piecewise, dfrobot_orp (SEN0165-like mid/offset)
+- **Capturer UI**: Calibration workflow directly from Home Assistant with capture buttons and number entities
+- **Calibration persistence**: Survives reboots via ESPHome preferences (flash storage)
+- **Real-time diagnostics**: noise detection, jump detection, drift monitoring (coming in Lot 4)
+- **Gated/campaign sampling**: e.g., filtration OFF for 60s then measure pH/ORP (coming in Lot 6)
+- **Water temperature compensation**: calibration and measurements compensated for Tw (coming in Lot 5)
 - **Compose ESPHome sensors**: uses native `ads1115`/`dallas`/`gpio` — does NOT reimplement drivers
 - **Stable entity IDs**: anti-swap protection by physical address (see [SENSOR-IDENTITY.md](docs/SENSOR-IDENTITY.md))
 - **Brand agnostic**: works with any analog pH/ORP probe, not locked to DFRobot/Atlas/etc.
@@ -21,13 +23,14 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 
 ## Current Status
 
-**Lot 1** — ADS1115 Channel Binding:
-- ✅ Real ADS1115-backed channels (pressure, pH, ORP)
-- ✅ Raw voltage exposure as diagnostic sensors
-- ✅ Calibration mode switch for high-frequency sampling
-- ✅ Channels compose native ESPHome ads1115 sensors
-- ✅ Pressure defaults: 1-2s interval, no heavy filters
-- ⏳ Calibration: pass-through stub (real N-point in Lot 2)
+**Lot 2** — N-Point Calibration & Capturer UI:
+- ✅ N-point calibration (1 to 10 points per channel)
+- ✅ Multiple algorithms: linear, polynomial, piecewise, dfrobot_orp
+- ✅ Capturer UI: capture buttons, x/y number entities, save button
+- ✅ DFRobot ORP: mid_mv/offset_mv number entities for SEN0165-like calibration
+- ✅ Calibration persistence to flash (survives reboots)
+- ✅ `cal_invalid` binary sensor when calibration is insufficient
+- ✅ YAML seed points with runtime override
 
 See [Roadmap](#roadmap) for upcoming lots.
 
@@ -42,7 +45,7 @@ external_components:
     refresh: 1d
 ```
 
-## Quick Start (Lot 1)
+## Quick Start (Lot 2)
 
 ```yaml
 # I2C bus for ADS1115
@@ -59,29 +62,13 @@ ads1115:
 sensor:
   - platform: ads1115
     ads1115_id: ads
-    multiplexer: 'A0_GND'
-    gain: 4.096
-    id: ads_pressure
-    internal: true
-    update_interval: 1s
-
-  - platform: ads1115
-    ads1115_id: ads
     multiplexer: 'A2_GND'
     gain: 4.096
     id: ads_ph
     internal: true
     update_interval: 1s
 
-  - platform: ads1115
-    ads1115_id: ads
-    multiplexer: 'A3_GND'
-    gain: 4.096
-    id: ads_orp
-    internal: true
-    update_interval: 1s
-
-# Pool Station with channels
+# Pool Station with N-point calibration
 pool_station:
   id: pool
   calibration_interval: 1s
@@ -90,29 +77,93 @@ pool_station:
     name: "Pool Calibration Mode"
 
   channels:
-    pressure:
-      source_id: ads_pressure
-      name: "Filter Pressure"
-      update_interval: 2s
-      raw_sensor:
-        name: "Filter Pressure Raw"
-
     ph:
       source_id: ads_ph
       name: "Pool pH"
       update_interval: 60s
+      
       raw_sensor:
         name: "Pool pH Raw"
-
-    orp:
-      source_id: ads_orp
-      name: "Pool ORP"
-      update_interval: 60s
-      raw_sensor:
-        name: "Pool ORP Raw"
+      
+      # Piecewise 3-point calibration (pH 4/7/10)
+      calibration:
+        type: piecewise
+        points:
+          - x: 2.03   # Volts at pH 4
+            y: 4.01
+          - x: 1.50   # Volts at pH 7
+            y: 7.00
+          - x: 0.98   # Volts at pH 10
+            y: 10.00
+      
+      # Capturer UI for Home Assistant
+      capturer:
+        point_count: 3
+        capture_buttons: true
+        point_numbers: true
+        save_button: true
+      
+      cal_invalid:
+        name: "pH Cal Invalid"
 ```
 
-For a complete example with temperature sensors, see [examples/pool-station-minimal.yaml](examples/pool-station-minimal.yaml).
+For a complete example with all channels, see [examples/pool-station-minimal.yaml](examples/pool-station-minimal.yaml).
+
+## Calibration from Home Assistant
+
+### Step-by-Step pH Calibration
+
+1. **Turn ON Calibration Mode**
+   - Toggle the "Pool Calibration Mode" switch ON
+   - All channels now sample at `calibration_interval` (1s) for responsive readings
+
+2. **Capture Point 1 (pH 4 buffer)**
+   - Immerse probe in pH 4.01 buffer solution
+   - Wait for stable reading on "Pool pH Raw" sensor
+   - Press **"Ph Capture Point 1"** button
+   - Set **"Ph Cal Point 1 Y"** number to `4.01`
+
+3. **Capture Point 2 (pH 7 buffer)**
+   - Rinse probe, immerse in pH 7.00 buffer
+   - Wait for stability
+   - Press **"Ph Capture Point 2"** button
+   - Set **"Ph Cal Point 2 Y"** to `7.00`
+
+4. **Capture Point 3 (pH 10 buffer)** (optional for piecewise)
+   - Rinse probe, immerse in pH 10.00 buffer
+   - Press **"Ph Capture Point 3"** button
+   - Set **"Ph Cal Point 3 Y"** to `10.00`
+
+5. **Save Calibration**
+   - Press **"Ph Save Calibration"** button
+   - Calibration is now persisted to flash and survives reboots
+
+6. **Turn OFF Calibration Mode**
+   - Return to normal `update_interval` sampling
+
+### DFRobot ORP Calibration (SEN0165-like)
+
+For ORP sensors using the DFRobot algorithm:
+
+1. Set **"Orp DFRobot Mid mV"** to your reference midpoint (typically 2500)
+2. Immerse probe in known ORP solution (e.g., 225mV)
+3. Note the raw voltage reading
+4. Adjust **"Orp DFRobot Offset mV"** until calibrated value matches expected
+5. Press **"Orp Save Calibration"**
+
+Formula: `ORP_mV = mid_mv - (raw_voltage × 1000) - offset_mv`
+
+## Calibration Algorithms
+
+| Algorithm | Min Points | Use Case | Parameters |
+|-----------|------------|----------|------------|
+| `linear` | 2 | Simple linear sensors (pressure) | — |
+| `piecewise` | 2 | pH sensors, non-linear but monotonic | — |
+| `polynomial` | order+1 | Complex curves | `order` (1-5), `precision` |
+| `dfrobot_orp` | 0 | DFRobot SEN0165 ORP modules | `mid_mv`, `offset_mv` |
+| `exponential` | 2 | TODO: not yet implemented | — |
+| `logarithmic` | 2 | TODO: not yet implemented | — |
+| `power` | 2 | TODO: not yet implemented | — |
 
 ## Hardware Reference
 
@@ -143,28 +194,60 @@ pool_station:
   calibration_mode:             # Optional: calibration mode switch
     name: "Calibration Mode"
   
-  channels:                     # ADS1115-backed measurement channels
+  channels:
     pressure:
-      source_id: ads_pressure   # Reference to ads1115 sensor
+      source_id: ads_pressure
       name: "Filter Pressure"
-      unit_of_measurement: "bar"
-      accuracy_decimals: 2
-      update_interval: 2s       # Normal mode interval
-      raw_sensor:               # Diagnostic raw voltage sensor
-        name: "Pressure Raw Volts"
-    
+      # ... (see below)
     ph:
       source_id: ads_ph
-      name: "Pool pH"
       # ...
-    
     orp:
       source_id: ads_orp
-      name: "Pool ORP"
       # ...
   
   water_temperature:            # For future Tw compensation (Lot 5)
     sensor_id: water_temp
+```
+
+### Channel Configuration
+
+```yaml
+channels:
+  ph:
+    source_id: ads_ph           # Reference to native ADS1115 sensor
+    name: "Pool pH"
+    unit_of_measurement: "pH"
+    accuracy_decimals: 2
+    icon: "mdi:ph"
+    update_interval: 60s        # Normal mode sampling interval
+    
+    raw_sensor:                 # Diagnostic raw voltage sensor
+      name: "Pool pH Raw"
+    
+    calibration:                # Calibration configuration
+      type: piecewise           # Algorithm: linear, polynomial, piecewise, dfrobot_orp
+      order: 2                  # For polynomial only (1-5)
+      precision: 2              # Output decimals
+      points:                   # Seed calibration points (x=volts, y=calibrated)
+        - x: 2.03
+          y: 4.01
+        - x: 1.50
+          y: 7.00
+      # DFRobot specific (only for dfrobot_orp type)
+      mid_mv: 2500.0
+      offset_mv: 0.0
+    
+    capturer:                   # Capturer UI configuration
+      point_count: 3            # Number of calibration points (1-10)
+      capture_buttons: true     # Create capture buttons per point
+      point_numbers: true       # Create x/y number entities per point
+      save_button: true         # Create save to flash button
+      mid_number: false         # DFRobot mid_mv number entity
+      offset_number: false      # DFRobot offset_mv number entity
+    
+    cal_invalid:                # Calibration invalid indicator
+      name: "pH Cal Invalid"
 ```
 
 ### Calibration Mode
@@ -177,47 +260,45 @@ Use calibration mode when:
 - Performing pH calibration with buffer solutions (pH 4, 7, 10)
 - Performing ORP calibration with reference solutions
 - Checking pressure sensor response
-- Capturing data for N-point calibration (Lot 2)
-
-### Channel Sensors
-
-Each channel creates two sensors:
-1. **Main sensor**: Calibrated value (stub pass-through in Lot 1)
-2. **Raw sensor**: Diagnostic voltage reading from ADS1115
-
-Raw sensors are always exposed (entity_category: diagnostic) for troubleshooting and calibration verification.
+- Capturing data for N-point calibration
 
 ## Roadmap
 
 | Lot | Content | Status |
 |-----|---------|--------|
 | 0 | Skeleton, docs, sensor stub | ✅ Done |
-| **1** | ADS1115 binding, raw values, calibration mode | ✅ **Current** |
-| 2 | N-point calibration, Capturer UI, persistence | 📋 Planned |
+| 1 | ADS1115 binding, raw values, calibration mode | ✅ Done |
+| **2** | **N-point calibration, Capturer UI, persistence** | ✅ **Current** |
 | 3 | j5-like filters (median, max_jump, streak, clamp) | 📋 Planned |
 | 4 | Diagnostics (noise, jumps, drift detection) | 📋 Planned |
 | 5 | Water temperature compensation | 📋 Planned |
 | 6 | Gates/campaigns (conditional sampling) | 📋 Planned |
-| 7 | Home Assistant polish, services, migration guide | 📋 Planned |
+| 7 | HA polish, services, migration guide | 📋 Planned |
 | 8 | (Optional) Interference detection, EZO support | 🔮 Future |
 
-## Lot 1 — What's Real vs Stub
+## Lot 2 — What's New
 
-### Real (working)
-- ADS1115 source sensor composition (reads actual ADC values)
-- Channel subscription to source sensors
-- Raw voltage diagnostic sensors (always accurate)
-- Calibration mode switch (controls sampling frequency)
-- Update interval switching based on calibration mode
-- Temperature sensors with address-bound configuration
+### Calibration Algorithms
+- **linear**: 2-point linear interpolation with extrapolation
+- **piecewise**: N-point linear segments between adjacent points
+- **polynomial**: Least-squares polynomial regression (order 1-5)
+- **dfrobot_orp**: SEN0165-like mid/offset formula for ORP
 
-### Stub (pass-through, coming in later lots)
-- **pH calibration**: passes through voltage (Lot 2: N-point algorithms)
-- **ORP calibration**: converts V→mV (Lot 2: proper calibration)
-- **Pressure calibration**: passes through voltage (Lot 2: formula config)
-- **Filters**: no filtering applied (Lot 3: median, jump rejection)
-- **Diagnostics**: no noise/drift detection (Lot 4)
-- **Tw compensation**: sensor bound but not used (Lot 5)
+### Capturer UI (Home Assistant)
+- **Capture Buttons**: Copy current raw voltage into calibration point X
+- **Point X/Y Numbers**: Edit raw voltage (X) and calibrated value (Y) per point
+- **Save Button**: Persist calibration to flash (survives reboot)
+- **DFRobot Numbers**: mid_mv and offset_mv adjustment for ORP
+
+### Persistence
+- Calibration automatically loads from flash on boot
+- Runtime changes via Capturer UI are temporary until Save is pressed
+- YAML seed points are used as initial values, can be overridden at runtime
+
+### Validation
+- `cal_invalid` binary sensor indicates insufficient points for algorithm
+- Graceful fallback to pass-through when calibration invalid
+- Logging with tag `pool_station` for troubleshooting
 
 ## Documentation
 

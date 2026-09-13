@@ -1,4 +1,5 @@
 #include "pool_station.h"
+#include "calibration_ui.h"
 
 namespace esphome {
 namespace pool_station {
@@ -114,6 +115,39 @@ void PoolStationComponent::set_calibration_mode_active(bool active) {
   }
 }
 
+PoolStationChannelSensor *PoolStationComponent::get_channel(uint8_t type) {
+  auto it = this->channels_.find(type);
+  if (it != this->channels_.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
+void PoolStationComponent::register_point_x_number(CalibrationPointXNumber *num, uint8_t channel_type, uint8_t point_index) {
+  if (num == nullptr) return;
+  this->point_x_numbers_[channel_type][point_index] = num;
+}
+
+void PoolStationComponent::register_point_y_number(CalibrationPointYNumber *num, uint8_t channel_type, uint8_t point_index) {
+  if (num == nullptr) return;
+  this->point_y_numbers_[channel_type][point_index] = num;
+}
+
+void PoolStationComponent::register_dfrobot_mid_number(DFRobotMidNumber *num, uint8_t channel_type) {
+  if (num == nullptr) return;
+  this->dfrobot_mid_numbers_[channel_type] = num;
+}
+
+void PoolStationComponent::register_dfrobot_offset_number(DFRobotOffsetNumber *num, uint8_t channel_type) {
+  if (num == nullptr) return;
+  this->dfrobot_offset_numbers_[channel_type] = num;
+}
+
+void PoolStationComponent::register_cal_invalid_sensor(CalibrationInvalidSensor *sensor, uint8_t channel_type) {
+  if (sensor == nullptr) return;
+  this->cal_invalid_sensors_[channel_type] = sensor;
+}
+
 
 // ============================================================================
 // CalibrationModeSwitch
@@ -158,11 +192,24 @@ void PoolStationChannelSensor::setup() {
     return;
   }
   
+  // Load calibration from preferences (if available)
+  this->calibration_.load_from_preferences();
+  
+  // Subscribe to source sensor
   this->source_sensor_->add_on_state_callback([this](float value) {
     this->on_source_value_(value);
   });
   
   ESP_LOGD(TAG, "Channel %s subscribed to source sensor", this->get_channel_type_name());
+  
+  // Log calibration status
+  if (this->calibration_.get_type() != CAL_TYPE_NONE) {
+    ESP_LOGI(TAG, "Channel %s calibration: type=%s, valid=%s, points=%zu",
+             this->get_channel_type_name(),
+             this->calibration_.get_type_name(),
+             this->calibration_.is_valid() ? "YES" : "NO",
+             this->calibration_.get_point_count());
+  }
 }
 
 void PoolStationChannelSensor::loop() {
@@ -175,6 +222,9 @@ void PoolStationChannelSensor::dump_config() {
   if (this->raw_sensor_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Raw sensor: configured");
   }
+  
+  // Dump calibration config
+  this->calibration_.dump_config();
 }
 
 const char *PoolStationChannelSensor::get_channel_type_name() const {
@@ -184,6 +234,40 @@ const char *PoolStationChannelSensor::get_channel_type_name() const {
     case CHANNEL_TYPE_ORP: return "orp";
     default: return "unknown";
   }
+}
+
+void PoolStationChannelSensor::set_calibration_type(uint8_t type) {
+  this->calibration_.set_type(static_cast<CalibrationType>(type));
+}
+
+void PoolStationChannelSensor::set_polynomial_order(uint8_t order) {
+  this->calibration_.set_polynomial_order(order);
+}
+
+void PoolStationChannelSensor::set_calibration_precision(uint8_t decimals) {
+  this->calibration_.set_precision(decimals);
+}
+
+void PoolStationChannelSensor::set_dfrobot_mid_mv(float mid) {
+  this->calibration_.set_dfrobot_mid_mv(mid);
+}
+
+void PoolStationChannelSensor::set_dfrobot_offset_mv(float offset) {
+  this->calibration_.set_dfrobot_offset_mv(offset);
+}
+
+void PoolStationChannelSensor::add_calibration_point(float x, float y) {
+  this->calibration_.add_point(x, y);
+}
+
+void PoolStationChannelSensor::set_preferences_key(uint32_t key) {
+  this->calibration_.set_preferences_key(key);
+}
+
+void PoolStationChannelSensor::notify_calibration_updated() {
+  // This is called after a capture button press or manual point edit
+  // We could trigger number entity updates here if needed
+  ESP_LOGD(TAG, "Calibration updated for channel %s", this->get_channel_type_name());
 }
 
 void PoolStationChannelSensor::on_source_value_(float value) {
@@ -201,46 +285,48 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   
   this->last_raw_value_ = value;
   
+  // Publish raw value to diagnostic sensor
   if (this->raw_sensor_ != nullptr) {
     this->raw_sensor_->publish_state(value);
   }
   
-  float calibrated = this->apply_calibration_(value);
+  // Apply calibration
+  float calibrated;
+  if (this->calibration_.get_type() != CAL_TYPE_NONE && this->calibration_.is_valid()) {
+    calibrated = this->calibration_.calibrate(value);
+  } else {
+    // Fallback: use channel-specific default transforms
+    switch (this->channel_type_) {
+      case CHANNEL_TYPE_PRESSURE:
+        // Pass-through voltage (user should configure calibration)
+        calibrated = value;
+        break;
+        
+      case CHANNEL_TYPE_PH:
+        // Pass-through voltage (user should configure calibration)
+        calibrated = value;
+        break;
+        
+      case CHANNEL_TYPE_ORP:
+        // Default: convert V to mV
+        calibrated = value * 1000.0f;
+        break;
+        
+      default:
+        calibrated = value;
+        break;
+    }
+  }
+  
   this->last_calibrated_value_ = calibrated;
   
+  // Publish calibrated value
   this->publish_state(calibrated);
   
-  ESP_LOGV(TAG, "Channel %s: raw=%.4f V, calibrated=%.2f", 
-           this->get_channel_type_name(), value, calibrated);
-}
-
-float PoolStationChannelSensor::apply_calibration_(float raw_voltage) {
-  switch (this->channel_type_) {
-    case CHANNEL_TYPE_PRESSURE: {
-      // Lot 1 stub: pass-through (real calibration in Lot 2)
-      // Example formula for 0-5V 0-10bar sensor (will be configurable):
-      // pressure_bar = (voltage / 5.0) * 10.0
-      // For now, pass-through voltage as placeholder
-      return raw_voltage;
-    }
-    
-    case CHANNEL_TYPE_PH: {
-      // Lot 1 stub: pass-through (real N-point calibration in Lot 2)
-      // pH electrodes typically output ~0-3V for pH 0-14
-      // Neutral pH 7.0 is around mid-scale voltage
-      return raw_voltage;
-    }
-    
-    case CHANNEL_TYPE_ORP: {
-      // Lot 1 stub: convert voltage to millivolts (ORP is often expressed in mV)
-      // Most ORP modules output 0-3V for -2000mV to +2000mV
-      // For now, convert V to mV as simple transform
-      return raw_voltage * 1000.0f;
-    }
-    
-    default:
-      return raw_voltage;
-  }
+  ESP_LOGV(TAG, "Channel %s: raw=%.4f V, calibrated=%.2f (type=%s, valid=%s)", 
+           this->get_channel_type_name(), value, calibrated,
+           this->calibration_.get_type_name(),
+           this->calibration_.is_valid() ? "yes" : "no");
 }
 
 
@@ -274,7 +360,7 @@ const char *PoolStationSensor::get_role_name() const {
 
 void PoolStationSensor::publish_value(float value) {
   this->last_raw_value_ = value;
-  this->last_calibrated_value_ = value;  // No calibration in Lot 1 legacy mode
+  this->last_calibrated_value_ = value;  // No calibration in legacy mode
   
   this->publish_state(value);
 }

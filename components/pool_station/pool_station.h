@@ -4,6 +4,7 @@
 #include "esphome/core/log.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
+#include "calibration_engine.h"
 #include <vector>
 #include <map>
 #include <functional>
@@ -42,36 +43,32 @@ enum SensorRole : uint8_t {
   ROLE_PRESSURE_CALIBRATED = 31,
 };
 
-/**
- * Calibration algorithm modes (for future Lot 2).
- */
-enum CalibrationMode : uint8_t {
-  CAL_MODE_NONE = 0,
-  CAL_MODE_LINEAR = 1,
-  CAL_MODE_POLYNOMIAL = 2,
-  CAL_MODE_EXPONENTIAL = 3,
-  CAL_MODE_LOGARITHMIC = 4,
-  CAL_MODE_POWER = 5,
-  CAL_MODE_PIECEWISE = 6,
-  CAL_MODE_DFROBOT_ORP = 7,
-};
-
 // Forward declarations
 class PoolStationComponent;
 class PoolStationSensor;
 class PoolStationChannelSensor;
 class CalibrationModeSwitch;
 
+// Calibration UI forward declarations
+class CalibrationPointXNumber;
+class CalibrationPointYNumber;
+class DFRobotMidNumber;
+class DFRobotOffsetNumber;
+class CalibrationCaptureButton;
+class CalibrationSaveButton;
+class CalibrationInvalidSensor;
+
 /**
  * Main pool_station component.
  * 
  * Orchestrates sensor readings, calibration, and diagnostics.
- * Lot 1: Real ADS1115 channel binding with raw values exposure.
+ * Lot 2: N-point calibration with persistence and HA UI.
  * 
  * Design principles:
  * - Composes ESPHome ads1115/dallas/gpio — does NOT reimplement drivers
  * - Channels listen to source sensors and publish transformed values
  * - Calibration mode switch enables fast update intervals
+ * - Calibration engine per channel with persistence to flash
  */
 class PoolStationComponent : public PollingComponent {
  public:
@@ -99,8 +96,18 @@ class PoolStationComponent : public PollingComponent {
   bool is_calibration_mode() const { return this->calibration_mode_active_; }
   uint32_t get_calibration_interval() const { return this->calibration_interval_; }
 
+  // Channel access (for UI components)
+  PoolStationChannelSensor *get_channel(uint8_t type);
+
   // Called by calibration switch
   void set_calibration_mode_active(bool active);
+
+  // Calibration UI registration
+  void register_point_x_number(CalibrationPointXNumber *num, uint8_t channel_type, uint8_t point_index);
+  void register_point_y_number(CalibrationPointYNumber *num, uint8_t channel_type, uint8_t point_index);
+  void register_dfrobot_mid_number(DFRobotMidNumber *num, uint8_t channel_type);
+  void register_dfrobot_offset_number(DFRobotOffsetNumber *num, uint8_t channel_type);
+  void register_cal_invalid_sensor(CalibrationInvalidSensor *sensor, uint8_t channel_type);
 
  protected:
   uint32_t calibration_interval_{1000};
@@ -117,6 +124,13 @@ class PoolStationComponent : public PollingComponent {
 
   // Legacy registered sensors (Lot 0)
   std::map<uint8_t, PoolStationSensor *> sensors_;
+
+  // Calibration UI components (indexed by channel type, then point index)
+  std::map<uint8_t, std::map<uint8_t, CalibrationPointXNumber *>> point_x_numbers_;
+  std::map<uint8_t, std::map<uint8_t, CalibrationPointYNumber *>> point_y_numbers_;
+  std::map<uint8_t, DFRobotMidNumber *> dfrobot_mid_numbers_;
+  std::map<uint8_t, DFRobotOffsetNumber *> dfrobot_offset_numbers_;
+  std::map<uint8_t, CalibrationInvalidSensor *> cal_invalid_sensors_;
 };
 
 
@@ -147,8 +161,11 @@ class CalibrationModeSwitch : public switch_::Switch, public Component {
  * 
  * Wraps an ADS1115 source sensor and provides:
  * - Raw voltage exposure (diagnostic sensor)
- * - Calibrated value (stub pass-through for Lot 1)
+ * - Calibrated value via CalibrationEngine
  * - Calibration mode interval switching
+ * - Persistence of calibration to flash
+ * 
+ * Lot 2: Full N-point calibration support.
  */
 class PoolStationChannelSensor : public sensor::Sensor, public Component {
  public:
@@ -166,14 +183,28 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void set_raw_sensor(sensor::Sensor *sensor) { this->raw_sensor_ = sensor; }
   void set_update_interval(uint32_t interval_ms) { this->configured_interval_ = interval_ms; }
 
+  // Calibration configuration
+  void set_calibration_type(uint8_t type);
+  void set_polynomial_order(uint8_t order);
+  void set_calibration_precision(uint8_t decimals);
+  void set_dfrobot_mid_mv(float mid);
+  void set_dfrobot_offset_mv(float offset);
+  void add_calibration_point(float x, float y);
+  void set_preferences_key(uint32_t key);
+
   // Accessors
   ChannelType get_channel_type() const { return this->channel_type_; }
   const char *get_channel_type_name() const;
   float get_raw_value() const { return this->last_raw_value_; }
+  
+  // Calibration engine access (for UI components)
+  CalibrationEngine *get_calibration_engine() { return &this->calibration_; }
+
+  // Called when calibration is updated (to refresh UI number entities)
+  void notify_calibration_updated();
 
  protected:
   void on_source_value_(float value);
-  float apply_calibration_(float raw_voltage);
 
   ChannelType channel_type_{CHANNEL_TYPE_PRESSURE};
   PoolStationComponent *parent_{nullptr};
@@ -185,6 +216,9 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   
   float last_raw_value_{NAN};
   float last_calibrated_value_{NAN};
+  
+  // Calibration engine
+  CalibrationEngine calibration_;
   
   // Callback ID for source sensor subscription
   optional<CallbackManager<void(float)>::CancelToken> source_callback_;
