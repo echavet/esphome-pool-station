@@ -85,10 +85,10 @@ def refresh_calibration_ui(
     """Mirror PoolStationComponent::refresh_calibration_ui for one channel."""
     for idx, num in point_x.items():
         pt = engine.get_point(idx)
-        num.publish_state(pt.x if pt.is_valid() else float("nan"))
+        num.publish_state(pt.x if not math.isnan(pt.x) else float("nan"))
     for idx, num in point_y.items():
         pt = engine.get_point(idx)
-        num.publish_state(pt.y if pt.is_valid() else float("nan"))
+        num.publish_state(pt.y if not math.isnan(pt.y) else float("nan"))
     if point_count_number is not None:
         point_count_number.publish_state(float(engine.get_point_count()))
     if algorithm_select is not None:
@@ -168,6 +168,25 @@ class NotifyRefreshContractTest(unittest.TestCase):
         self.assertEqual(algo.state, "piecewise")
         self.assertTrue(draft.state)
 
+    def test_capture_publishes_x_even_if_y_is_nan(self):
+        """Capturer writes X first; HA must show volts before Y is edited."""
+        engine = FakeEngine([(0.46, float("nan"))])
+        point_x = make_slots(3)
+        point_y = make_slots(3)
+        refresh_calibration_ui(engine, point_x, point_y)
+        self.assertAlmostEqual(point_x[0].state, 0.46)
+        self.assertTrue(math.isnan(point_y[0].state))
+
+    def test_capture_forced_slot_publish_wins(self):
+        """After notify, Capturer writes raw V onto the pressed slot's X number."""
+        engine = FakeEngine()
+        point_x = make_slots(3)
+        refresh_calibration_ui(engine, point_x, {})
+        self.assertTrue(math.isnan(point_x[0].state))
+        captured = 0.46
+        point_x[0].publish_state(captured)
+        self.assertAlmostEqual(point_x[0].state, 0.46)
+
 
 class NotifyImplementationTest(unittest.TestCase):
     def test_notify_is_not_a_stub(self):
@@ -238,6 +257,35 @@ class NotifyImplementationTest(unittest.TestCase):
         self.assertIn("channel->notify_calibration_updated()", ui)
         self.assertGreaterEqual(ui.count("notify_calibration_updated()"), 6)
 
+    def test_capture_refreshes_x_number(self):
+        with open(UI_CPP_PATH, encoding="utf-8") as handle:
+            ui = handle.read()
+        match = re.search(
+            r"void CalibrationCaptureButton::press_action\(\)\s*\{(?P<body>.*?)^\}",
+            ui,
+            re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(match, "CalibrationCaptureButton::press_action() not found")
+        body = match.group("body")
+        self.assertIn("set_point", body)
+        self.assertIn("notify_calibration_updated", body)
+        self.assertIn("publish_captured_point_x", body)
+        self.assertLess(body.find("notify_calibration_updated"), body.find("publish_captured_point_x"))
+
+        x_update = re.search(
+            r"void CalibrationPointXNumber::update_from_calibration\(\)\s*\{(?P<body>.*?)^\}",
+            ui,
+            re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(x_update)
+        x_body = x_update.group("body")
+        self.assertIn("isnan(pt.x)", x_body)
+        self.assertNotIn("pt.is_valid()", x_body)
+
+        with open(HEADER_PATH, encoding="utf-8") as handle:
+            header = handle.read()
+        self.assertIn("publish_captured_point_x", header)
+
 
 class CodegenRegistrationTest(unittest.TestCase):
     def test_codegen_registers_algo_and_point_count_on_parent(self):
@@ -261,6 +309,24 @@ class CodegenRegistrationTest(unittest.TestCase):
         self.assertIn("register_draft_pending_sensor", attrs)
         self.assertIn("register_point_x_number", attrs)
         self.assertIn("register_point_y_number", attrs)
+
+    def test_point_numbers_register_component_before_ha_discovery(self):
+        """Capturer X/Y numbers need setup() so publish_state reaches HA (0.7.12 class)."""
+        with open(INIT_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.find("# Point X number (raw voltage)")
+        end = source.find("# Save button", start)
+        self.assertGreater(start, 0)
+        self.assertGreater(end, start)
+        block = source[start:end]
+        self.assertGreaterEqual(block.count("await cg.register_component("), 2)
+        self.assertIn("register_point_x_number", block)
+        self.assertIn("register_point_y_number", block)
+        self.assertLess(block.find("set_parent("), block.find("await cg.register_component("))
+        self.assertLess(
+            block.find("register_point_x_number"),
+            block.find("await cg.register_component("),
+        )
 
     def test_docs_distinguish_slots_from_live_count(self):
         with open(INIT_PATH, encoding="utf-8") as handle:

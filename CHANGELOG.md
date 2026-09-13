@@ -13,9 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Symptoms**: ESP log shows `Added new calibration point for channel 0 (total: 4)` but Home Assistant still has 3 `number.*_pressure_cal_point_*` entities; values often stay `unknown`; no `point_count` entity
 - **Root cause 1**: `PoolStationChannelSensor::notify_calibration_updated()` was a stub (log only). Add/Remove/Save/capture/algo/commit/discard never refreshed registered `CalibrationPointX/YNumber`, `CalibrationAlgorithmSelect`, `CalibrationPointCountNumber`, `cal_invalid`, or `draft_pending`
 - **Root cause 2**: `capturer.point_count` is the **max preallocated HA slots** codegen'd at compile time. Deploy YAML with `point_count: 3` cannot show a 4th point. `point_count_number` (live engine count) was not registered on the parent and is optional in schema
+- **Also confirmed**: `pressure_capture_point_1` logs `Captured raw=0.4600V into point 0` but `number.*_pressure_cal_point_1_x` stays `unknown` while the live volt sensor shows ~0.45 V
 - **Fix**:
   - `notify_calibration_updated()` calls `PoolStationComponent::refresh_calibration_ui()` which republishes all registered widgets for that channel
   - Codegen registers `algorithm_select`, `point_count_number`, and `draft_pending` on the parent (point X/Y were already registered)
+  - Capturer point X/Y numbers now `register_component` (same 0.7.12 gap as algorithm select) so `setup()` / `publish_state` reach HA
+  - `update_from_calibration()` publishes X (or Y) whenever that axis is finite — capture writes X first; requiring both axes valid left HA at `unknown`
+  - Capture path: after notify, `publish_captured_point_x()` writes the captured volts onto that slot's X number so Étalonnage updates immediately
   - Channel `setup()` refreshes UI after `load_from_preferences()` so numbers are not stuck `unknown` when they setup before prefs load
   - Save also notifies so HA stays in sync
 - **Docs**: `point_count` = max HA slots (recommend 5–10 with add/remove); `point_count_number` = live engine count. Example YAML uses `point_count: 5` plus `point_count_number`

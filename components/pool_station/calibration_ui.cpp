@@ -31,7 +31,9 @@ void CalibrationPointXNumber::update_from_calibration() {
   if (engine == nullptr) return;
   
   CalibrationPoint pt = engine->get_point(this->point_index_);
-  if (pt.is_valid()) {
+  // Publish X whenever it is finite. Capture writes X first; Y may still be NaN.
+  // Requiring is_valid() (both axes) left HA at `unknown` after "Capturer".
+  if (!std::isnan(pt.x)) {
     this->publish_state(pt.x);
   } else {
     this->publish_state(NAN);
@@ -92,7 +94,7 @@ void CalibrationPointYNumber::update_from_calibration() {
   if (engine == nullptr) return;
   
   CalibrationPoint pt = engine->get_point(this->point_index_);
-  if (pt.is_valid()) {
+  if (!std::isnan(pt.y)) {
     this->publish_state(pt.y);
   } else {
     this->publish_state(NAN);
@@ -257,8 +259,11 @@ void CalibrationCaptureButton::press_action() {
   
   engine->set_point(this->point_index_, raw_value, y_value);
   
-  // Notify the parent to update any linked number entities
+  // Refresh all Capturer widgets, then force the captured slot's X number
+  // so HA shows the voltage immediately (notify can miss this slot if the
+  // engine re-sorts by X or the point is not fully valid yet).
   channel->notify_calibration_updated();
+  this->parent_->publish_captured_point_x(this->channel_type_, this->point_index_, raw_value);
   
   ESP_LOGI(TAG, "Captured raw=%.4fV into point %d for channel %d", 
            raw_value, this->point_index_, this->channel_type_);

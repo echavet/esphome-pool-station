@@ -215,6 +215,18 @@ void PoolStationComponent::refresh_calibration_ui(uint8_t channel_type) {
   }
 }
 
+void PoolStationComponent::publish_captured_point_x(uint8_t channel_type, uint8_t point_index, float x) {
+  auto ch_it = this->point_x_numbers_.find(channel_type);
+  if (ch_it == this->point_x_numbers_.end()) {
+    return;
+  }
+  auto num_it = ch_it->second.find(point_index);
+  if (num_it == ch_it->second.end() || num_it->second == nullptr) {
+    return;
+  }
+  num_it->second->publish_state(x);
+}
+
 void PoolStationComponent::register_campaign(MeasurementCampaign *campaign) {
   if (campaign == nullptr) return;
   

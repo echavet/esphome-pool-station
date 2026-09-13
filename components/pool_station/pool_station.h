@@ -145,6 +145,11 @@ class PoolStationComponent : public PollingComponent {
   // Push engine state to all registered Capturer widgets for this channel.
   void refresh_calibration_ui(uint8_t channel_type);
 
+  // Publish a captured raw voltage onto the HA X number for that slot.
+  // Used after Capturer so the Étalonnage X field updates even if the
+  // engine point is not yet fully valid (Y still NaN) or was re-sorted.
+  void publish_captured_point_x(uint8_t channel_type, uint8_t point_index, float x);
+
   // Campaign registration (Lot 6)
   void register_campaign(MeasurementCampaign *campaign);
   MeasurementCampaign *get_campaign(const std::string &name);
