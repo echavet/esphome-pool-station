@@ -11,8 +11,6 @@
 namespace esphome {
 namespace pool_station {
 
-static const char *const GATE_TAG = "pool_station.gate";
-
 /**
  * Gate condition type enumeration.
  */

@@ -15,8 +15,6 @@
 namespace esphome {
 namespace pool_station {
 
-static const char *const CAMPAIGN_TAG = "pool_station.campaign";
-
 // Forward declarations
 class PoolStationComponent;
 class PoolStationChannelSensor;

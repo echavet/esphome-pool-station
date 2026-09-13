@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-09-13
+
+### Fixed — TAG Redefinition Compilation Error
+
+#### CRIT: TAG Redefinition in pool_station Namespace
+- **Error**: `error: redefinition of 'const char* const esphome::pool_station::TAG'`
+- **Root cause**: `pool_station.h` defined `TAG` at namespace level, and `.cpp` files that included it (directly or via other headers) also defined their own `TAG`, causing redefinition errors in the same translation unit
+- **Affected files**:
+  - `calibration_ui.cpp`: included `calibration_ui.h` → `pool_station.h`, then redefined `TAG`
+  - `measurement_campaign.cpp`: included `pool_station.h` directly, then redefined `TAG`
+- **Fix**: Removed `TAG` from `pool_station.h` header. Each `.cpp` file now defines its own `TAG` locally (standard ESPHome pattern):
+  - `pool_station.cpp`: `TAG = "pool_station"`
+  - `calibration_ui.cpp`: `TAG = "pool_station.ui"`
+  - `measurement_gate.cpp`: `TAG = "pool_station.gate"`
+  - `measurement_campaign.cpp`: `TAG = "pool_station.campaign"`
+- Also removed unused `CAMPAIGN_TAG` from `measurement_campaign.h` and `GATE_TAG` from `measurement_gate.h`
+- LOG_* macros now work correctly with file-local `TAG` definitions
+- SelectTraits fix from 0.7.7 preserved
+
+---
+
 ## [0.7.7] - 2026-09-13
 
 ### Fixed — SelectTraits::set_options + LOG_* TAG
