@@ -18,8 +18,6 @@
 namespace esphome {
 namespace pool_station {
 
-static const char *const TAG = "pool_station";
-
 /**
  * Channel types for ADS1115-backed sensors.
  * Must match Python CHANNEL_TYPE_* constants in __init__.py

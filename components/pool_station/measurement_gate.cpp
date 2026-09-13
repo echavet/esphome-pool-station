@@ -157,15 +157,15 @@ std::string MeasurementGate::get_status_string() const {
 }
 
 void MeasurementGate::dump_config() const {
-  ESP_LOGCONFIG(GATE_TAG, "  Gate: %s", 
+  ESP_LOGCONFIG(TAG, "  Gate: %s", 
                 this->config_.name.empty() ? "(unnamed)" : this->config_.name.c_str());
-  ESP_LOGCONFIG(GATE_TAG, "    Enabled: %s", this->enabled_ ? "YES" : "NO");
-  ESP_LOGCONFIG(GATE_TAG, "    Invert: %s", this->config_.invert ? "YES" : "NO");
-  ESP_LOGCONFIG(GATE_TAG, "    Conditions: %zu", this->config_.conditions.size());
+  ESP_LOGCONFIG(TAG, "    Enabled: %s", this->enabled_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "    Invert: %s", this->config_.invert ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "    Conditions: %zu", this->config_.conditions.size());
   
   for (size_t i = 0; i < this->config_.conditions.size(); i++) {
     const auto &cond = this->config_.conditions[i];
-    ESP_LOGCONFIG(GATE_TAG, "      [%zu] %s", i, cond.describe().c_str());
+    ESP_LOGCONFIG(TAG, "      [%zu] %s", i, cond.describe().c_str());
   }
 }
 
@@ -174,7 +174,7 @@ void MeasurementGate::dump_config() const {
 // ============================================================================
 
 void GateBlockedBinarySensor::setup() {
-  ESP_LOGD(GATE_TAG, "Setting up Gate Blocked Binary Sensor");
+  ESP_LOGD(TAG, "Setting up Gate Blocked Binary Sensor");
   this->publish_state(false);  // Default: not blocked
 }
 
@@ -189,7 +189,7 @@ void GateBlockedBinarySensor::update_state() {
   
   bool blocked = this->gate_->is_blocked();
   if (this->state != blocked) {
-    ESP_LOGD(GATE_TAG, "Gate blocked state changed: %s → %s",
+    ESP_LOGD(TAG, "Gate blocked state changed: %s → %s",
              this->state ? "BLOCKED" : "OPEN",
              blocked ? "BLOCKED" : "OPEN");
     this->publish_state(blocked);
@@ -204,13 +204,13 @@ namespace gate_functions {
 
 bool evaluate_binary_sensor(binary_sensor::BinarySensor *sensor, bool desired_state) {
   if (sensor == nullptr) {
-    ESP_LOGW(GATE_TAG, "Gate condition has null binary_sensor reference");
+    ESP_LOGW(TAG, "Gate condition has null binary_sensor reference");
     return true;  // No sensor = condition satisfied (fail-open)
   }
   
   // Check if sensor has a valid state
   if (!sensor->has_state()) {
-    ESP_LOGV(GATE_TAG, "Binary sensor %s has no state yet", 
+    ESP_LOGV(TAG, "Binary sensor %s has no state yet", 
              sensor->get_name().c_str());
     return false;  // No state yet = condition not satisfied (fail-closed)
   }
@@ -220,7 +220,7 @@ bool evaluate_binary_sensor(binary_sensor::BinarySensor *sensor, bool desired_st
 
 bool evaluate_switch(switch_::Switch *sw, bool desired_state) {
   if (sw == nullptr) {
-    ESP_LOGW(GATE_TAG, "Gate condition has null switch reference");
+    ESP_LOGW(TAG, "Gate condition has null switch reference");
     return true;  // No switch = condition satisfied (fail-open)
   }
   
@@ -230,13 +230,13 @@ bool evaluate_switch(switch_::Switch *sw, bool desired_state) {
 bool evaluate_threshold(sensor::Sensor *sensor, ThresholdOperator op, 
                        float threshold, float tolerance) {
   if (sensor == nullptr) {
-    ESP_LOGW(GATE_TAG, "Gate condition has null sensor reference");
+    ESP_LOGW(TAG, "Gate condition has null sensor reference");
     return true;  // No sensor = condition satisfied (fail-open)
   }
   
   // Check if sensor has a valid state
   if (!sensor->has_state() || std::isnan(sensor->state)) {
-    ESP_LOGV(GATE_TAG, "Sensor %s has no valid state", 
+    ESP_LOGV(TAG, "Sensor %s has no valid state", 
              sensor->get_name().c_str());
     return false;  // No state = condition not satisfied (fail-closed)
   }

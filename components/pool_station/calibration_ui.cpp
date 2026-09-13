@@ -3,23 +3,22 @@
 namespace esphome {
 namespace pool_station {
 
-static const char *const UI_TAG = "pool_station.ui";
-static const char *const TAG = "pool_station.ui";  // Required by LOG_* macros
+static const char *const TAG = "pool_station.ui";
 
 // ============================================================================
 // CalibrationPointXNumber
 // ============================================================================
 
 void CalibrationPointXNumber::setup() {
-  ESP_LOGD(UI_TAG, "Setting up CalibrationPointXNumber (channel=%d, point=%d)", 
+  ESP_LOGD(TAG, "Setting up CalibrationPointXNumber (channel=%d, point=%d)", 
            this->channel_type_, this->point_index_);
   this->update_from_calibration();
 }
 
 void CalibrationPointXNumber::dump_config() {
   LOG_NUMBER("", "Calibration Point X", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
-  ESP_LOGCONFIG(UI_TAG, "  Point index: %d", this->point_index_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Point index: %d", this->point_index_);
 }
 
 void CalibrationPointXNumber::update_from_calibration() {
@@ -44,7 +43,7 @@ void CalibrationPointXNumber::control(float value) {
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -63,7 +62,7 @@ void CalibrationPointXNumber::control(float value) {
   engine->set_point(this->point_index_, value, y_value);
   this->publish_state(value);
   
-  ESP_LOGI(UI_TAG, "Set calibration point %d X=%.4f for channel %d", 
+  ESP_LOGI(TAG, "Set calibration point %d X=%.4f for channel %d", 
            this->point_index_, value, this->channel_type_);
 }
 
@@ -72,15 +71,15 @@ void CalibrationPointXNumber::control(float value) {
 // ============================================================================
 
 void CalibrationPointYNumber::setup() {
-  ESP_LOGD(UI_TAG, "Setting up CalibrationPointYNumber (channel=%d, point=%d)", 
+  ESP_LOGD(TAG, "Setting up CalibrationPointYNumber (channel=%d, point=%d)", 
            this->channel_type_, this->point_index_);
   this->update_from_calibration();
 }
 
 void CalibrationPointYNumber::dump_config() {
   LOG_NUMBER("", "Calibration Point Y", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
-  ESP_LOGCONFIG(UI_TAG, "  Point index: %d", this->point_index_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Point index: %d", this->point_index_);
 }
 
 void CalibrationPointYNumber::update_from_calibration() {
@@ -105,7 +104,7 @@ void CalibrationPointYNumber::control(float value) {
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -124,7 +123,7 @@ void CalibrationPointYNumber::control(float value) {
   engine->set_point(this->point_index_, x_value, value);
   this->publish_state(value);
   
-  ESP_LOGI(UI_TAG, "Set calibration point %d Y=%.4f for channel %d", 
+  ESP_LOGI(TAG, "Set calibration point %d Y=%.4f for channel %d", 
            this->point_index_, value, this->channel_type_);
 }
 
@@ -133,13 +132,13 @@ void CalibrationPointYNumber::control(float value) {
 // ============================================================================
 
 void DFRobotMidNumber::setup() {
-  ESP_LOGD(UI_TAG, "Setting up DFRobotMidNumber (channel=%d)", this->channel_type_);
+  ESP_LOGD(TAG, "Setting up DFRobotMidNumber (channel=%d)", this->channel_type_);
   this->update_from_calibration();
 }
 
 void DFRobotMidNumber::dump_config() {
   LOG_NUMBER("", "DFRobot Mid mV", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void DFRobotMidNumber::update_from_calibration() {
@@ -159,7 +158,7 @@ void DFRobotMidNumber::control(float value) {
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -169,7 +168,7 @@ void DFRobotMidNumber::control(float value) {
   engine->set_dfrobot_mid_mv(value);
   this->publish_state(value);
   
-  ESP_LOGI(UI_TAG, "Set DFRobot mid_mv=%.1f for channel %d", value, this->channel_type_);
+  ESP_LOGI(TAG, "Set DFRobot mid_mv=%.1f for channel %d", value, this->channel_type_);
 }
 
 // ============================================================================
@@ -177,13 +176,13 @@ void DFRobotMidNumber::control(float value) {
 // ============================================================================
 
 void DFRobotOffsetNumber::setup() {
-  ESP_LOGD(UI_TAG, "Setting up DFRobotOffsetNumber (channel=%d)", this->channel_type_);
+  ESP_LOGD(TAG, "Setting up DFRobotOffsetNumber (channel=%d)", this->channel_type_);
   this->update_from_calibration();
 }
 
 void DFRobotOffsetNumber::dump_config() {
   LOG_NUMBER("", "DFRobot Offset mV", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void DFRobotOffsetNumber::update_from_calibration() {
@@ -203,7 +202,7 @@ void DFRobotOffsetNumber::control(float value) {
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -213,7 +212,7 @@ void DFRobotOffsetNumber::control(float value) {
   engine->set_dfrobot_offset_mv(value);
   this->publish_state(value);
   
-  ESP_LOGI(UI_TAG, "Set DFRobot offset_mv=%.1f for channel %d", value, this->channel_type_);
+  ESP_LOGI(TAG, "Set DFRobot offset_mv=%.1f for channel %d", value, this->channel_type_);
 }
 
 // ============================================================================
@@ -222,25 +221,25 @@ void DFRobotOffsetNumber::control(float value) {
 
 void CalibrationCaptureButton::dump_config() {
   LOG_BUTTON("", "Calibration Capture Button", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
-  ESP_LOGCONFIG(UI_TAG, "  Point index: %d", this->point_index_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Point index: %d", this->point_index_);
 }
 
 void CalibrationCaptureButton::press_action() {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(UI_TAG, "Capture button has no parent");
+    ESP_LOGW(TAG, "Capture button has no parent");
     return;
   }
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found for capture", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found for capture", this->channel_type_);
     return;
   }
   
   float raw_value = channel->get_raw_value();
   if (std::isnan(raw_value)) {
-    ESP_LOGW(UI_TAG, "Cannot capture: no raw value available for channel %d", this->channel_type_);
+    ESP_LOGW(TAG, "Cannot capture: no raw value available for channel %d", this->channel_type_);
     return;
   }
   
@@ -261,7 +260,7 @@ void CalibrationCaptureButton::press_action() {
   // Notify the parent to update any linked number entities
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Captured raw=%.4fV into point %d for channel %d", 
+  ESP_LOGI(TAG, "Captured raw=%.4fV into point %d for channel %d", 
            raw_value, this->point_index_, this->channel_type_);
 }
 
@@ -271,18 +270,18 @@ void CalibrationCaptureButton::press_action() {
 
 void CalibrationSaveButton::dump_config() {
   LOG_BUTTON("", "Calibration Save Button", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationSaveButton::press_action() {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(UI_TAG, "Save button has no parent");
+    ESP_LOGW(TAG, "Save button has no parent");
     return;
   }
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found for save", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found for save", this->channel_type_);
     return;
   }
   
@@ -294,7 +293,7 @@ void CalibrationSaveButton::press_action() {
   if (this->parent_->has_water_temperature()) {
     water_temp = this->parent_->get_water_temperature();
     engine->set_calibration_temperature(water_temp);
-    ESP_LOGI(UI_TAG, "Captured Tw=%.1f°C at calibration time for channel %d", 
+    ESP_LOGI(TAG, "Captured Tw=%.1f°C at calibration time for channel %d", 
              water_temp, this->channel_type_);
   }
   
@@ -304,10 +303,10 @@ void CalibrationSaveButton::press_action() {
   channel->publish_calibration_temperature();
   
   if (!std::isnan(water_temp)) {
-    ESP_LOGI(UI_TAG, "Saved calibration for channel %d to flash (Tw=%.1f°C)", 
+    ESP_LOGI(TAG, "Saved calibration for channel %d to flash (Tw=%.1f°C)", 
              this->channel_type_, water_temp);
   } else {
-    ESP_LOGI(UI_TAG, "Saved calibration for channel %d to flash", this->channel_type_);
+    ESP_LOGI(TAG, "Saved calibration for channel %d to flash", this->channel_type_);
   }
 }
 
@@ -316,7 +315,7 @@ void CalibrationSaveButton::press_action() {
 // ============================================================================
 
 void CalibrationInvalidSensor::setup() {
-  ESP_LOGD(UI_TAG, "Setting up CalibrationInvalidSensor (channel=%d)", this->channel_type_);
+  ESP_LOGD(TAG, "Setting up CalibrationInvalidSensor (channel=%d)", this->channel_type_);
   this->publish_state(false);
 }
 
@@ -345,17 +344,17 @@ void CalibrationInvalidSensor::loop() {
     this->publish_state(is_invalid);
     
     if (is_invalid) {
-      ESP_LOGW(UI_TAG, "Channel %d calibration is INVALID (need %d points, have %zu)",
+      ESP_LOGW(TAG, "Channel %d calibration is INVALID (need %d points, have %zu)",
                this->channel_type_, engine->get_minimum_points(), engine->get_point_count());
     } else {
-      ESP_LOGI(UI_TAG, "Channel %d calibration is valid", this->channel_type_);
+      ESP_LOGI(TAG, "Channel %d calibration is valid", this->channel_type_);
     }
   }
 }
 
 void CalibrationInvalidSensor::dump_config() {
   LOG_BINARY_SENSOR("", "Calibration Invalid Sensor", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 // ============================================================================
@@ -389,7 +388,7 @@ std::string CalibrationAlgorithmSelect::type_to_string(CalibrationType type) {
 }
 
 void CalibrationAlgorithmSelect::setup() {
-  ESP_LOGD(UI_TAG, "Setting up CalibrationAlgorithmSelect (channel=%d)", this->channel_type_);
+  ESP_LOGD(TAG, "Setting up CalibrationAlgorithmSelect (channel=%d)", this->channel_type_);
   
   // Set available options - ESPHome 2026.4 requires initializer_list<const char*>
   this->traits.set_options({"none", "linear", "polynomial", "piecewise", "dfrobot_orp"});
@@ -399,7 +398,7 @@ void CalibrationAlgorithmSelect::setup() {
 
 void CalibrationAlgorithmSelect::dump_config() {
   LOG_SELECT("", "Calibration Algorithm Select", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationAlgorithmSelect::update_from_calibration() {
@@ -420,7 +419,7 @@ void CalibrationAlgorithmSelect::control(const std::string &value) {
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -434,7 +433,7 @@ void CalibrationAlgorithmSelect::control(const std::string &value) {
   // Notify channel that calibration changed
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Changed calibration algorithm to '%s' for channel %d", 
+  ESP_LOGI(TAG, "Changed calibration algorithm to '%s' for channel %d", 
            value.c_str(), this->channel_type_);
 }
 
@@ -444,18 +443,18 @@ void CalibrationAlgorithmSelect::control(const std::string &value) {
 
 void CalibrationAddPointButton::dump_config() {
   LOG_BUTTON("", "Calibration Add Point Button", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationAddPointButton::press_action() {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(UI_TAG, "Add point button has no parent");
+    ESP_LOGW(TAG, "Add point button has no parent");
     return;
   }
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -463,7 +462,7 @@ void CalibrationAddPointButton::press_action() {
   if (engine == nullptr) return;
   
   if (engine->get_point_count() >= MAX_CALIBRATION_POINTS) {
-    ESP_LOGW(UI_TAG, "Cannot add point: maximum (%d) reached", MAX_CALIBRATION_POINTS);
+    ESP_LOGW(TAG, "Cannot add point: maximum (%d) reached", MAX_CALIBRATION_POINTS);
     return;
   }
   
@@ -471,7 +470,7 @@ void CalibrationAddPointButton::press_action() {
   engine->add_point(0.0f, 0.0f);
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Added new calibration point for channel %d (total: %zu)", 
+  ESP_LOGI(TAG, "Added new calibration point for channel %d (total: %zu)", 
            this->channel_type_, engine->get_point_count());
 }
 
@@ -481,18 +480,18 @@ void CalibrationAddPointButton::press_action() {
 
 void CalibrationRemovePointButton::dump_config() {
   LOG_BUTTON("", "Calibration Remove Point Button", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationRemovePointButton::press_action() {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(UI_TAG, "Remove point button has no parent");
+    ESP_LOGW(TAG, "Remove point button has no parent");
     return;
   }
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -501,7 +500,7 @@ void CalibrationRemovePointButton::press_action() {
   
   size_t count = engine->get_point_count();
   if (count == 0) {
-    ESP_LOGW(UI_TAG, "Cannot remove point: no points exist");
+    ESP_LOGW(TAG, "Cannot remove point: no points exist");
     return;
   }
   
@@ -509,7 +508,7 @@ void CalibrationRemovePointButton::press_action() {
   engine->remove_point(count - 1);
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Removed last calibration point for channel %d (remaining: %zu)", 
+  ESP_LOGI(TAG, "Removed last calibration point for channel %d (remaining: %zu)", 
            this->channel_type_, engine->get_point_count());
 }
 
@@ -519,18 +518,18 @@ void CalibrationRemovePointButton::press_action() {
 
 void CalibrationCommitButton::dump_config() {
   LOG_BUTTON("", "Calibration Commit Button", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationCommitButton::press_action() {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(UI_TAG, "Commit button has no parent");
+    ESP_LOGW(TAG, "Commit button has no parent");
     return;
   }
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found for commit", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found for commit", this->channel_type_);
     return;
   }
   
@@ -538,7 +537,7 @@ void CalibrationCommitButton::press_action() {
   if (engine == nullptr) return;
   
   if (!engine->is_draft_mode()) {
-    ESP_LOGW(UI_TAG, "Cannot commit: draft mode not enabled for channel %d", this->channel_type_);
+    ESP_LOGW(TAG, "Cannot commit: draft mode not enabled for channel %d", this->channel_type_);
     return;
   }
   
@@ -546,7 +545,7 @@ void CalibrationCommitButton::press_action() {
   if (this->parent_->has_water_temperature()) {
     float water_temp = this->parent_->get_water_temperature();
     engine->set_calibration_temperature(water_temp);
-    ESP_LOGI(UI_TAG, "Captured Tw=%.1f°C at commit time for channel %d", 
+    ESP_LOGI(TAG, "Captured Tw=%.1f°C at commit time for channel %d", 
              water_temp, this->channel_type_);
   }
   
@@ -554,7 +553,7 @@ void CalibrationCommitButton::press_action() {
   channel->publish_calibration_temperature();
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Committed draft calibration for channel %d", this->channel_type_);
+  ESP_LOGI(TAG, "Committed draft calibration for channel %d", this->channel_type_);
 }
 
 // ============================================================================
@@ -563,18 +562,18 @@ void CalibrationCommitButton::press_action() {
 
 void CalibrationDiscardButton::dump_config() {
   LOG_BUTTON("", "Calibration Discard Button", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationDiscardButton::press_action() {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(UI_TAG, "Discard button has no parent");
+    ESP_LOGW(TAG, "Discard button has no parent");
     return;
   }
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found for discard", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found for discard", this->channel_type_);
     return;
   }
   
@@ -582,14 +581,14 @@ void CalibrationDiscardButton::press_action() {
   if (engine == nullptr) return;
   
   if (!engine->is_draft_mode()) {
-    ESP_LOGW(UI_TAG, "Cannot discard: draft mode not enabled for channel %d", this->channel_type_);
+    ESP_LOGW(TAG, "Cannot discard: draft mode not enabled for channel %d", this->channel_type_);
     return;
   }
   
   engine->discard_draft();
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Discarded draft changes for channel %d", this->channel_type_);
+  ESP_LOGI(TAG, "Discarded draft changes for channel %d", this->channel_type_);
 }
 
 // ============================================================================
@@ -597,13 +596,13 @@ void CalibrationDiscardButton::press_action() {
 // ============================================================================
 
 void CalibrationPointCountNumber::setup() {
-  ESP_LOGD(UI_TAG, "Setting up CalibrationPointCountNumber (channel=%d)", this->channel_type_);
+  ESP_LOGD(TAG, "Setting up CalibrationPointCountNumber (channel=%d)", this->channel_type_);
   this->update_from_calibration();
 }
 
 void CalibrationPointCountNumber::dump_config() {
   LOG_NUMBER("", "Calibration Point Count", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 void CalibrationPointCountNumber::update_from_calibration() {
@@ -623,7 +622,7 @@ void CalibrationPointCountNumber::control(float value) {
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) {
-    ESP_LOGW(UI_TAG, "Channel %d not found", this->channel_type_);
+    ESP_LOGW(TAG, "Channel %d not found", this->channel_type_);
     return;
   }
   
@@ -649,7 +648,7 @@ void CalibrationPointCountNumber::control(float value) {
   this->publish_state(static_cast<float>(target_count));
   channel->notify_calibration_updated();
   
-  ESP_LOGI(UI_TAG, "Set calibration point count to %d for channel %d", 
+  ESP_LOGI(TAG, "Set calibration point count to %d for channel %d", 
            target_count, this->channel_type_);
 }
 
@@ -658,7 +657,7 @@ void CalibrationPointCountNumber::control(float value) {
 // ============================================================================
 
 void DraftPendingSensor::setup() {
-  ESP_LOGD(UI_TAG, "Setting up DraftPendingSensor (channel=%d)", this->channel_type_);
+  ESP_LOGD(TAG, "Setting up DraftPendingSensor (channel=%d)", this->channel_type_);
   this->publish_state(false);
 }
 
@@ -685,14 +684,14 @@ void DraftPendingSensor::loop() {
     this->publish_state(has_changes);
     
     if (has_changes) {
-      ESP_LOGD(UI_TAG, "Channel %d has uncommitted draft changes", this->channel_type_);
+      ESP_LOGD(TAG, "Channel %d has uncommitted draft changes", this->channel_type_);
     }
   }
 }
 
 void DraftPendingSensor::dump_config() {
   LOG_BINARY_SENSOR("", "Draft Pending Sensor", this);
-  ESP_LOGCONFIG(UI_TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 
 }  // namespace pool_station
