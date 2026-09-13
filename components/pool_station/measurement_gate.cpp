@@ -4,6 +4,8 @@
 namespace esphome {
 namespace pool_station {
 
+static const char *const TAG = "pool_station.gate";  // Required by LOG_* macros
+
 // ============================================================================
 // Gate Condition
 // ============================================================================

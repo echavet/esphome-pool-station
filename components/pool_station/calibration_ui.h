@@ -209,7 +209,6 @@ class CalibrationAlgorithmSelect : public select::Select, public Component {
   uint8_t channel_type_{0};
   
   // Maps option strings to CalibrationType values
-  static const std::vector<std::string> ALGORITHM_OPTIONS;
   static CalibrationType string_to_type(const std::string &str);
   static std::string type_to_string(CalibrationType type);
 };
