@@ -89,7 +89,7 @@ def _cpp_setup_set_options(source):
         raise AssertionError("CalibrationAlgorithmSelect::setup() not found")
     body = setup_match.group("body")
     orp_match = re.search(
-        r"channel_type_\s*==\s*CHANNEL_TYPE_ORP\s*\{[^}]*set_options\(\{(?P<opts>[^}]+)\}\)",
+        r"channel_type_\s*==\s*CHANNEL_TYPE_ORP\)\s*\{.*?set_options\(\{(?P<opts>[^}]+)\}\)",
         body,
         re.DOTALL,
     )
