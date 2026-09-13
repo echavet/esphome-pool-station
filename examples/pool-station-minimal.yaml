@@ -1,0 +1,208 @@
+# Pool Station — Minimal Example Configuration
+# 
+# This is a future-facing configuration showing the intended structure.
+# Lot 0 only provides the skeleton; actual sensor binding comes in Lot 1+.
+#
+# Hardware reference:
+#   - ESP32-S3 (pool-firmata-wifi)
+#   - ADS1115 on I2C (0x48): A0=pressure, A2=pH, A3=ORP
+#   - Dallas DS18B20: water (GPIO17), air sensors (GPIO13)
+#
+# See docs/SENSOR-IDENTITY.md for address binding rules.
+
+esphome:
+  name: pool-station
+  friendly_name: "Pool Station"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# External component from GitHub
+external_components:
+  - source: github://echavet/esphome-pool-station
+    components: [pool_station]
+    refresh: 1d
+
+# WiFi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# Enable logging
+logger:
+  level: INFO
+  logs:
+    pool_station: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+# =============================================================================
+# I2C Bus for ADS1115
+# =============================================================================
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+# =============================================================================
+# ADS1115 ADC (native ESPHome component)
+# =============================================================================
+ads1115:
+  - address: 0x48
+    id: ads
+
+# =============================================================================
+# Dallas 1-Wire buses
+# =============================================================================
+dallas:
+  - pin: GPIO17
+    id: dallas_water
+  - pin: GPIO13
+    id: dallas_air
+
+# =============================================================================
+# Temperature Sensors — ADDRESS-BOUND (see SENSOR-IDENTITY.md)
+# =============================================================================
+sensor:
+  # Water temperature — immersed probe
+  # IMPORTANT: Use YOUR actual ROM address, not this placeholder
+  - platform: dallas
+    dallas_id: dallas_water
+    address: 0xc80200000000xxxx  # Replace with actual address
+    name: "Water Temperature"
+    id: water_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+
+  # Air temperature — pump enclosure
+  - platform: dallas
+    dallas_id: dallas_air
+    address: 0x70010000000000xx  # Replace with actual address
+    name: "Air Temperature (Pump)"
+    id: air_pump_temp
+
+  # Air temperature — local ambient
+  - platform: dallas
+    dallas_id: dallas_air
+    address: 0x44010000000000xx  # Replace with actual address
+    name: "Air Temperature (Local)"
+    id: air_local_temp
+
+  # ---------------------------------------------------------------------------
+  # ADS1115 Raw Channels (future Lot 1+)
+  # ---------------------------------------------------------------------------
+  # Pressure sensor — A0
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A0_GND'
+    gain: 4.096
+    name: "Pressure Raw"
+    id: pressure_raw_mv
+    unit_of_measurement: "mV"
+    update_interval: 2s
+    # TODO Lot 1: bind to pool_station for calibration
+
+  # pH sensor — A2
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A2_GND'
+    gain: 4.096
+    name: "pH Raw"
+    id: ph_raw_mv
+    unit_of_measurement: "mV"
+    update_interval: 1s
+    # TODO Lot 1: bind to pool_station for calibration
+
+  # ORP sensor — A3
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A3_GND'
+    gain: 4.096
+    name: "ORP Raw"
+    id: orp_raw_mv
+    unit_of_measurement: "mV"
+    update_interval: 1s
+    # TODO Lot 1: bind to pool_station for calibration
+
+# =============================================================================
+# Pool Station Component (Lot 0: skeleton only)
+# =============================================================================
+pool_station:
+  id: pool
+  update_interval: 1s
+  
+  # Calibration configuration (stub — actual impl in Lot 2)
+  calibration:
+    mode: none  # Options: none, linear, polynomial, exponential, logarithmic, power, piecewise, dfrobot_orp
+    # points:   # Lot 2+: calibration points
+    #   - raw: 2048
+    #     reference: 7.0
+    #   - raw: 1800
+    #     reference: 4.0
+
+  # Water temperature for compensation (stub — actual impl in Lot 5)
+  water_temperature:
+    sensor_id: water_temp
+
+# =============================================================================
+# Pool Station Sensors (Lot 0: stub, actual binding in Lot 1+)
+# =============================================================================
+# Uncomment when Lot 1 is implemented:
+
+# sensor:
+#   - platform: pool_station
+#     pool_station_id: pool
+#     role: water_temperature
+#     name: "Pool Water (Calibrated)"
+#
+#   - platform: pool_station
+#     pool_station_id: pool
+#     role: ph_calibrated
+#     name: "Pool pH"
+#
+#   - platform: pool_station
+#     pool_station_id: pool
+#     role: orp_calibrated
+#     name: "Pool ORP"
+#
+#   - platform: pool_station
+#     pool_station_id: pool
+#     role: pressure_calibrated
+#     name: "Pool Filter Pressure"
+
+# =============================================================================
+# Future Lots — Placeholders
+# =============================================================================
+
+# Lot 3: Filters
+# filter_config:
+#   filter_samples: 5
+#   max_jump: 0.5
+#   streak: 3
+#   min: 0.0
+#   max: 14.0
+
+# Lot 4: Diagnostics
+# diagnostics:
+#   noise_threshold: 0.1
+#   jump_threshold: 0.5
+#   drift_window: 3600
+
+# Lot 6: Gates/Campaigns
+# campaigns:
+#   - name: "Filtration OFF pH"
+#     prepare:
+#       switch_id: filtration_pump
+#       state: OFF
+#     delay: 60s
+#     burst_samples: 10
+#     restore: true
