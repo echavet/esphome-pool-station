@@ -23,6 +23,20 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 
 ## Current Status
 
+**Lot 6** — Gates & Measurement Campaigns:
+- ✅ Per-channel `gate:` configuration to block sampling unless conditions met
+- ✅ Gate conditions: binary_sensor state, switch state, sensor threshold
+- ✅ `gate_blocked` binary_sensor exposes gate status to HA
+- ✅ Measurement campaigns with state machine: idle → preparing → waiting → sampling → restoring → idle
+- ✅ Campaign `prepare:` actions to control switches (e.g., turn filtration OFF)
+- ✅ Campaign `delay:` waits before sampling (e.g., 60s for water to settle)
+- ✅ Burst sampling: multiple samples per channel with configurable delay
+- ✅ `restore: true` returns actuators to prior state after sampling
+- ✅ Safety: `timeout:` max duration with automatic abort + restore
+- ✅ HA UI: start/abort buttons, `campaign_running` binary_sensor
+- ✅ Result sensors: capture last campaign values per channel
+- ✅ State transitions logged at INFO level with clear markers
+
 **Lot 5** — Water Temperature Reference + Compensation:
 - ✅ Top-level `water_temperature: sensor_id` binding to Dallas probe
 - ✅ Per-channel `temperature_compensation:` block for pH and ORP
@@ -416,10 +430,132 @@ Use calibration mode when:
 | 2 | N-point calibration, Capturer UI, persistence | ✅ Done |
 | 3 | j5-like filters (median, max_jump, streak, clamp) | ✅ Done |
 | 4 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
-| **5** | **Water temperature compensation (Tw)** | ✅ **Current** |
-| 6 | Gates/campaigns (conditional sampling) | 📋 Planned |
+| 5 | Water temperature compensation (Tw) | ✅ Done |
+| **6** | **Gates/campaigns (conditional sampling)** | ✅ **Current** |
 | 7 | HA polish, runtime algo select, services | 📋 Planned |
 | 8 | (Optional) Interference detection, EZO support | 🔮 Future |
+
+## Lot 6 — What's New
+
+### Continuous Gates
+
+Gates block sampling/publishing unless all configured conditions are met. Use cases:
+- Sample pH only when water is flowing (flow_switch binary_sensor ON)
+- Block pressure reading when pump is OFF (switch state check)
+- Require minimum pressure for valid readings (sensor threshold)
+
+```yaml
+channels:
+  ph:
+    # Gate blocks sampling when flow is not detected
+    gate:
+      conditions:
+        - name: "flow_active"
+          binary_sensor_id: flow_switch
+          state: true  # Sample only when flow is detected
+        - sensor_id: pressure
+          operator: ">="
+          threshold: 0.5  # Also require minimum pressure
+      gate_blocked:
+        name: "Pool pH Gate Blocked"
+```
+
+Gate conditions support:
+- **binary_sensor**: `binary_sensor_id` with `state: true/false`
+- **switch**: `switch_id` with `state: true/false`
+- **sensor threshold**: `sensor_id` with `operator` (>, >=, <, <=, ==) and `threshold`
+
+> **Calibration Mode**: Gates are bypassed in calibration mode so you can calibrate regardless of conditions.
+
+### Measurement Campaigns
+
+Campaigns are one-shot measurement sequences with actuator control. Eric's canonical scenario:
+1. Stop filtration pump
+2. Wait 60 seconds for water to settle
+3. Take burst samples of pH and ORP
+4. Restore filtration to prior state
+
+```yaml
+pool_station:
+  campaigns:
+    - name: "pH/ORP Quiescent"
+      # Prepare: turn off filtration before sampling
+      prepare:
+        - switch_id: relay_filtration
+          state: false
+      
+      # Wait for water to settle
+      delay: 60s
+      
+      # Channels to sample
+      sample_channels: [ph, orp]
+      
+      # Burst: take 3 samples, 500ms apart
+      burst_samples: 3
+      burst_delay: 500ms
+      
+      # Restore to prior state after sampling
+      restore: true
+      
+      # Safety timeout
+      timeout: 120s
+      
+      # Home Assistant UI
+      start_button:
+        name: "Start Quiescent Measurement"
+      abort_button:
+        name: "Abort Quiescent Measurement"
+      running:
+        name: "Quiescent Measurement Running"
+      
+      # Optional result sensors
+      result_sensors:
+        ph:
+          name: "Quiescent pH"
+        orp:
+          name: "Quiescent ORP"
+```
+
+### Campaign State Machine
+
+```
+IDLE → PREPARING → WAITING → SAMPLING → RESTORING → IDLE
+```
+
+State transitions are logged at INFO level with clear markers:
+
+```
+[pool_station.campaign] ========================================
+[pool_station.campaign] Starting campaign: pH/ORP Quiescent
+[pool_station.campaign] ========================================
+[pool_station.campaign] [pH/ORP Quiescent] State: IDLE → PREPARING
+[pool_station.campaign] Executing action: relay_filtration → OFF
+[pool_station.campaign] [pH/ORP Quiescent] State: PREPARING → WAITING
+...
+[pool_station.campaign] Campaign 'pH/ORP Quiescent' COMPLETE (duration: 63500 ms)
+```
+
+### Campaign Safety Features
+
+1. **Timeout**: Automatic abort + restore after configurable timeout
+2. **Restore**: Actuators return to prior state even on abort/timeout
+3. **Refuse Start**: Campaign won't start if already running
+4. **Safety Gate**: Optional gate that must be clear to start (future)
+
+### How to Run Filtration-Off Sample (Home Assistant)
+
+1. **Verify Flow**: Ensure "Flow Detector" shows ON (water flowing)
+2. **Check Sensors**: Verify pH and ORP sensors are reading normally
+3. **Start Campaign**: Press "Start Quiescent Measurement" button
+4. **Monitor State**: Watch "Quiescent Measurement Running" binary sensor
+   - Campaign turns filtration OFF
+   - Waits 60 seconds
+   - Takes 3 burst samples of pH and ORP
+   - Restores filtration to prior state
+5. **View Results**: Check "Quiescent pH" and "Quiescent ORP" sensors
+6. **Compare**: Compare quiescent values with normal readings
+
+---
 
 ## Lot 5 — What's New
 

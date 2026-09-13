@@ -5,6 +5,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-13
+
+### Added — Lot 6: Gates & Measurement Campaigns
+
+#### Measurement Gate Module (`measurement_gate.h/cpp`)
+- New `GateCondition` struct supporting three condition types:
+  - `GATE_COND_BINARY_SENSOR` — Check binary_sensor state
+  - `GATE_COND_SWITCH` — Check switch state
+  - `GATE_COND_SENSOR_THRESHOLD` — Sensor value comparison (>, >=, <, <=, ==)
+- New `GateConfig` struct for per-channel gate configuration
+- New `MeasurementGate` class orchestrating condition evaluation
+- Pure functions in `gate_functions` namespace (unit-testable)
+- `GateBlockedBinarySensor` class exposes gate status to Home Assistant
+
+#### Per-Channel Gate Configuration
+- `gate:` block under each channel
+- `conditions:` list of gate conditions (AND logic)
+- Each condition supports:
+  - `binary_sensor_id:` with `state: true/false`
+  - `switch_id:` with `state: true/false`
+  - `sensor_id:` with `operator:` (>, >=, <, <=, ==) and `threshold:`
+- `gate_blocked:` optional binary_sensor entity
+- `sample_when:` shorthand for simple single-condition gates
+- Calibration mode bypasses gates for testing
+
+#### Measurement Campaign Module (`measurement_campaign.h/cpp`)
+- New `CampaignAction` struct for switch state changes
+- New `CampaignSample` struct for captured measurements
+- New `CampaignResult` struct for campaign outcomes
+- New `CampaignConfig` struct for campaign configuration
+- New `MeasurementCampaign` class implementing state machine
+
+#### Campaign State Machine
+- **IDLE**: Not running, ready to start
+- **PREPARING**: Executing prepare actions (switch on/off)
+- **WAITING**: Waiting for delay before sampling
+- **SAMPLING**: Taking burst samples on configured channels
+- **RESTORING**: Restoring actuators to prior state
+- State transitions logged at INFO level with clear markers
+
+#### Campaign Configuration
+- `campaigns:` list at pool_station level
+- `name:` campaign identifier
+- `prepare:` list of switch state changes
+- `delay:` wait time before sampling (e.g., 60s)
+- `sample_channels:` list of channels to sample (pressure, ph, orp)
+- `burst_samples:` number of samples per channel
+- `burst_delay:` delay between burst samples
+- `restore:` restore actuators to prior state
+- `timeout:` maximum campaign duration (safety abort)
+- `conditions_tag:` optional A/B tag for results
+
+#### Campaign UI Entities
+- `CampaignStartButton` — Triggers campaign start
+- `CampaignAbortButton` — Aborts running campaign
+- `CampaignRunningSensor` — Binary sensor showing campaign state
+- `CampaignResultSensor` — Sensor capturing last campaign value per channel
+
+#### Safety Features
+- Configurable timeout with automatic abort + restore
+- Refuses to start if campaign already running
+- Actuators restored even on abort/timeout
+- Optional safety gate that must be clear to start (placeholder)
+
+### Changed
+- `PoolStationComponent` now tracks registered campaigns
+- `PoolStationChannelSensor` now integrates `MeasurementGate`
+- Gate check added to `on_source_value_()` pipeline
+- Pipeline: gate_check → raw → median → calibrate → temp_comp → guards → publish
+- Python codegen (`__init__.py`) extended with gate and campaign schemas
+- Example YAML demonstrates full Lot 6 configuration
+
+### Technical Notes
+- Gates use fail-closed semantics (no state = condition not met)
+- Gates are bypassed in calibration mode for testing
+- Campaign state transitions logged with channel name context
+- Campaign results include all burst samples for later analysis
+- Switches NOT hardcoded — reference by id from YAML
+- No breaking changes to Lots 2-5
+
+---
+
 ## [0.5.0] - 2026-09-13
 
 ### Added — Lot 5: Water Temperature Reference + Compensation
@@ -332,8 +414,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 2 | 0.2.0 | ✅ N-point calibration, Capturer UI, persistence | Done |
 | 3 | 0.3.0 | ✅ Filters (j5-like median, jump, clamp) | Done |
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
-| **5** | **0.5.0** | ✅ **Temperature compensation (Tw)** | **Current** |
-| 6 | 0.6.0 | Gates/campaigns | Planned |
+| 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
+| **6** | **0.6.0** | ✅ **Gates/campaigns** | **Current** |
 | 7 | 1.0.0 | HA polish, runtime algo select | Planned |
 
 ## Future Lots (Lot 7 candidates)

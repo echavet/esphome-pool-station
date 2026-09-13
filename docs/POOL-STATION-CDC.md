@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.1.0 (Lot 0)  
+> Version: 0.6.0 (Lot 6)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 
@@ -74,13 +74,18 @@
 
 ### F-GATE : Échantillonnage conditionné (Gates/Campaigns)
 
-| ID | Exigence | Lot |
-|----|----------|-----|
-| F-GATE-01 | Prepare : condition d'entrée (ex: filtration=OFF) | 6 |
-| F-GATE-02 | Delay : attente stabilisation (ex: 60s) | 6 |
-| F-GATE-03 | Burst : N échantillons rapprochés | 6 |
-| F-GATE-04 | Restore : retour état initial | 6 |
-| F-GATE-05 | Comparaison chlore ON/OFF | 6 |
+| ID | Exigence | Lot | Status |
+|----|----------|-----|--------|
+| F-GATE-01 | Prepare : condition d'entrée (ex: filtration=OFF) | 6 | ✅ Done |
+| F-GATE-02 | Delay : attente stabilisation (ex: 60s) | 6 | ✅ Done |
+| F-GATE-03 | Burst : N échantillons rapprochés | 6 | ✅ Done |
+| F-GATE-04 | Restore : retour état initial | 6 | ✅ Done |
+| F-GATE-05 | Comparaison chlore ON/OFF (via conditions_tag) | 6 | ✅ Done |
+| F-GATE-06 | Gates: bloquer échantillonnage si conditions non satisfaites | 6 | ✅ Done |
+| F-GATE-07 | gate_blocked binary_sensor | 6 | ✅ Done |
+| F-GATE-08 | Campaign state machine (idle→preparing→waiting→sampling→restoring→idle) | 6 | ✅ Done |
+| F-GATE-09 | Safety timeout avec abort + restore | 6 | ✅ Done |
+| F-GATE-10 | UI: start/abort buttons, campaign_running binary_sensor | 6 | ✅ Done |
 
 ### F-TEMP : Compensation température eau
 

@@ -148,6 +148,26 @@ void PoolStationComponent::register_cal_invalid_sensor(CalibrationInvalidSensor 
   this->cal_invalid_sensors_[channel_type] = sensor;
 }
 
+void PoolStationComponent::register_campaign(MeasurementCampaign *campaign) {
+  if (campaign == nullptr) return;
+  
+  const std::string &name = campaign->get_name();
+  if (this->campaigns_.count(name) > 0) {
+    ESP_LOGW(TAG, "Campaign '%s' already registered, replacing", name.c_str());
+  }
+  
+  this->campaigns_[name] = campaign;
+  ESP_LOGD(TAG, "Registered campaign: %s", name.c_str());
+}
+
+MeasurementCampaign *PoolStationComponent::get_campaign(const std::string &name) {
+  auto it = this->campaigns_.find(name);
+  if (it != this->campaigns_.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 
 // ============================================================================
 // CalibrationModeSwitch
@@ -331,6 +351,15 @@ void PoolStationChannelSensor::dump_config() {
       ESP_LOGCONFIG(TAG, "    calibration_temp_sensor: configured");
     }
   }
+  
+  // Dump gate config (Lot 6)
+  if (this->gate_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Gate:");
+    this->gate_->dump_config();
+    if (this->gate_blocked_sensor_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    gate_blocked_sensor: configured");
+    }
+  }
 }
 
 const char *PoolStationChannelSensor::get_channel_type_name() const {
@@ -487,6 +516,13 @@ void PoolStationChannelSensor::notify_calibration_updated() {
   ESP_LOGD(TAG, "Calibration updated for channel %s", this->get_channel_type_name());
 }
 
+bool PoolStationChannelSensor::is_gated() const {
+  if (this->gate_ == nullptr) {
+    return false;  // No gate = not gated
+  }
+  return this->gate_->is_blocked();
+}
+
 void PoolStationChannelSensor::on_source_value_(float value) {
   uint32_t now = millis();
   
@@ -499,6 +535,35 @@ void PoolStationChannelSensor::on_source_value_(float value) {
     return;
   }
   this->last_update_ = now;
+  
+  // =========================================================================
+  // GATE CHECK (Lot 6): Block sampling if gate is blocked
+  // =========================================================================
+  if (this->gate_ != nullptr && this->gate_->is_enabled()) {
+    bool was_blocked = this->gate_blocked_sensor_ != nullptr && this->gate_blocked_sensor_->state;
+    bool is_blocked = this->gate_->is_blocked();
+    
+    // Update gate_blocked sensor if state changed
+    if (this->gate_blocked_sensor_ != nullptr && was_blocked != is_blocked) {
+      this->gate_blocked_sensor_->publish_state(is_blocked);
+      if (is_blocked) {
+        const GateCondition *blocker = this->gate_->get_blocking_condition();
+        ESP_LOGI(TAG, "Channel %s: Gate BLOCKED%s",
+                 this->get_channel_type_name(),
+                 blocker ? (" by " + blocker->describe()).c_str() : "");
+      } else {
+        ESP_LOGI(TAG, "Channel %s: Gate OPEN (sampling resumed)", this->get_channel_type_name());
+      }
+    }
+    
+    // In calibration mode, bypass gate for testing
+    bool bypass_gate = this->parent_ != nullptr && this->parent_->is_calibration_mode();
+    
+    if (is_blocked && !bypass_gate) {
+      ESP_LOGV(TAG, "Channel %s: Sampling blocked by gate", this->get_channel_type_name());
+      return;  // Don't process or publish
+    }
+  }
   
   // =========================================================================
   // PIPELINE: raw → median → raw_sensor → calibrate → temp_comp 

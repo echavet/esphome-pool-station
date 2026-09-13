@@ -1,6 +1,6 @@
-# Pool Station — Example Configuration (Lot 5)
+# Pool Station — Example Configuration (Lot 6)
 # 
-# This configuration demonstrates Lot 2, 3, 4, and 5 features:
+# This configuration demonstrates Lot 2, 3, 4, 5, and 6 features:
 #   - N-point calibration with multiple algorithms
 #   - Capturer UI for calibration from Home Assistant
 #   - Calibration persistence across reboots
@@ -10,6 +10,8 @@
 #   - Lot 4: Diagnostics (noise detection, stuck detection, out-of-range flags)
 #   - Lot 5: Temperature compensation with Nernstian model for pH
 #   - Lot 5: Calibration temperature metadata (Tw at save time)
+#   - Lot 6: Gates (conditional sampling based on external state)
+#   - Lot 6: Campaigns (one-shot measurement sequences with actuator control)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -170,7 +172,45 @@ sensor:
     id: air_local_temp
 
 # =============================================================================
-# Pool Station Component (Lot 2)
+# Switches for relays (Lot 6 campaigns need these)
+# =============================================================================
+switch:
+  # Filtration pump relay — controlled by campaigns
+  - platform: gpio
+    pin: GPIO16
+    id: relay_filtration
+    name: "Filtration Pump"
+    icon: "mdi:pump"
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  # Chlorine injection relay (optional, for A/B testing)
+  - platform: gpio
+    pin: GPIO18
+    id: relay_chlorine
+    name: "Chlorine Injection"
+    icon: "mdi:bottle-tonic"
+    restore_mode: RESTORE_DEFAULT_OFF
+
+# =============================================================================
+# Binary sensors for flow detection (Lot 6 gates)
+# =============================================================================
+binary_sensor:
+  # Flow detector — used as gate condition
+  - platform: gpio
+    pin:
+      number: GPIO19
+      mode: INPUT_PULLUP
+      inverted: true
+    id: flow_switch
+    name: "Flow Detector"
+    icon: "mdi:water-pump"
+    device_class: running
+    filters:
+      - delayed_on: 500ms
+      - delayed_off: 2s
+
+# =============================================================================
+# Pool Station Component (Lot 6)
 # =============================================================================
 pool_station:
   id: pool
@@ -338,6 +378,19 @@ pool_station:
       calibration_temp_sensor:
         name: "Pool pH Calibration Tw"
       
+      # =====================================================================
+      # Gate (Lot 6) — Block sampling unless conditions are met
+      # =====================================================================
+      # Gate blocks sampling when flow is not detected (pump off).
+      # This prevents bad readings when water isn't flowing past the sensor.
+      gate:
+        conditions:
+          - name: "flow_active"
+            binary_sensor_id: flow_switch
+            state: true  # Sample only when flow is detected
+        gate_blocked:
+          name: "Pool pH Gate Blocked"
+      
       # Capturer UI - 3 points for pH 4/7/10 calibration
       capturer:
         point_count: 3
@@ -427,6 +480,18 @@ pool_station:
       calibration_temp_sensor:
         name: "Pool ORP Calibration Tw"
       
+      # =====================================================================
+      # Gate (Lot 6) — Block sampling unless conditions are met
+      # =====================================================================
+      # Same gate as pH - block when flow is not detected
+      gate:
+        conditions:
+          - name: "flow_active"
+            binary_sensor_id: flow_switch
+            state: true
+        gate_blocked:
+          name: "Pool ORP Gate Blocked"
+      
       # Capturer UI - includes mid/offset numbers for DFRobot
       capturer:
         point_count: 1     # Can capture offset from known solution
@@ -442,6 +507,56 @@ pool_station:
   # Water temperature for future Tw compensation (Lot 5)
   water_temperature:
     sensor_id: water_temp
+
+  # ===========================================================================
+  # CAMPAIGNS (Lot 6) — One-shot measurement sequences
+  # ===========================================================================
+  # Eric's canonical scenario: stop filtration for 60s, then sample pH/ORP,
+  # then restore filtration to prior state.
+  #
+  # State machine: idle → preparing → waiting → sampling → restoring → idle
+  campaigns:
+    - name: "pH/ORP Quiescent"
+      # Prepare: turn off filtration before sampling
+      prepare:
+        - switch_id: relay_filtration
+          state: false  # Turn filtration OFF
+      
+      # Wait for water to settle (60 seconds)
+      delay: 60s
+      
+      # Channels to sample
+      sample_channels:
+        - ph
+        - orp
+      
+      # Burst sampling: take 3 samples with 500ms between each
+      burst_samples: 3
+      burst_delay: 500ms
+      
+      # Restore filtration to prior state after sampling
+      restore: true
+      
+      # Safety timeout: abort and restore if campaign takes too long
+      timeout: 120s
+      
+      # Conditions tag for A/B results (e.g., "filtration_off")
+      conditions_tag: "filtration_off"
+      
+      # Home Assistant UI
+      start_button:
+        name: "Start Quiescent Measurement"
+      abort_button:
+        name: "Abort Quiescent Measurement"
+      running:
+        name: "Quiescent Measurement Running"
+      
+      # Optional: Result sensors that capture last campaign values
+      result_sensors:
+        ph:
+          name: "Quiescent pH"
+        orp:
+          name: "Quiescent ORP"
 
 # =============================================================================
 # HOW TO CALIBRATE FROM HOME ASSISTANT
@@ -628,5 +743,154 @@ pool_station:
 #
 # calibration_temp_sensor:
 #   name: "pH Calibration Tw"    # Shows Tw at last calibration save
+#
+# =============================================================================
+# GATES CONFIGURATION (Lot 6)
+# =============================================================================
+#
+# Gates block sampling/publishing unless all configured conditions are met.
+# Use cases:
+#   - Sample pH only when water is flowing (flow_switch binary_sensor)
+#   - Block pressure reading when pump is OFF (switch state)
+#   - Require minimum pressure for valid readings (sensor threshold)
+#
+# ## Gate Conditions
+#
+# gate:
+#   conditions:
+#     # Binary sensor condition: sample only when sensor is ON/OFF
+#     - binary_sensor_id: flow_switch
+#       state: true              # Sample when flow is detected
+#
+#     # Switch condition: sample only when switch is ON/OFF
+#     - switch_id: relay_filtration
+#       state: true              # Sample when filtration is running
+#
+#     # Sensor threshold condition: sample only when sensor meets threshold
+#     - sensor_id: pressure
+#       operator: ">="           # >, >=, <, <=, ==
+#       threshold: 0.5           # Sample when pressure >= 0.5 bar
+#
+#   # Optional: expose gate_blocked state to Home Assistant
+#   gate_blocked:
+#     name: "pH Gate Blocked"
+#
+# ## Sample When Shorthand
+#
+# For simple single-condition gates, use sample_when:
+#
+# sample_when:
+#   - binary_sensor_id: flow_switch
+#     state: true
+#
+# ## Calibration Mode Bypass
+#
+# In calibration mode, gates are bypassed so you can calibrate regardless of
+# conditions. Remember to ensure proper conditions when switching back to
+# normal operation!
+#
+# =============================================================================
+# CAMPAIGNS CONFIGURATION (Lot 6)
+# =============================================================================
+#
+# Campaigns are one-shot measurement sequences with actuator control.
+# Eric's canonical scenario: stop filtration → wait → sample pH/ORP → restore
+#
+# ## State Machine
+#
+#   IDLE → PREPARING → WAITING → SAMPLING → RESTORING → IDLE
+#
+# State transitions are logged at INFO level with clear markers.
+#
+# ## Campaign Configuration
+#
+# campaigns:
+#   - name: "pH/ORP Quiescent"
+#     
+#     # Prepare actions: switch state changes before sampling
+#     prepare:
+#       - switch_id: relay_filtration
+#         state: false           # Turn OFF before sampling
+#       - switch_id: relay_chlorine
+#         state: false           # Turn OFF chlorine injection too
+#
+#     # Delay before sampling (wait for water to settle)
+#     delay: 60s
+#
+#     # Channels to sample
+#     sample_channels:
+#       - ph
+#       - orp
+#
+#     # Burst sampling: take multiple samples per channel
+#     burst_samples: 3           # Take 3 samples
+#     burst_delay: 500ms         # 500ms between samples
+#
+#     # Restore actuators to prior state after sampling
+#     restore: true
+#
+#     # Safety timeout: abort and restore if campaign takes too long
+#     timeout: 120s
+#
+#     # Conditions tag for A/B results
+#     conditions_tag: "filtration_off"
+#
+#     # Home Assistant UI entities
+#     start_button:
+#       name: "Start Quiescent Measurement"
+#     abort_button:
+#       name: "Abort Quiescent Measurement"
+#     running:
+#       name: "Quiescent Measurement Running"
+#
+#     # Result sensors: capture last campaign values
+#     result_sensors:
+#       ph:
+#         name: "Quiescent pH"
+#       orp:
+#         name: "Quiescent ORP"
+#
+# ## Safety Features
+#
+# 1. **Timeout**: Campaigns automatically abort and restore after timeout
+# 2. **Safety Gate**: Optional gate that must be clear to start campaign
+# 3. **Restore**: Actuators return to prior state even on abort/timeout
+# 4. **Refuse Start**: Campaign won't start if already running
+#
+# ## How to Run Filtration-Off Sample (Home Assistant Walkthrough)
+#
+# 1. **Verify Flow**: Ensure "Flow Detector" shows ON (water flowing)
+# 2. **Check Sensors**: Verify pH and ORP sensors are reading normally
+# 3. **Start Campaign**: Press "Start Quiescent Measurement" button
+# 4. **Monitor State**: Watch "Quiescent Measurement Running" binary sensor
+#    - Campaign will:
+#      a) Turn filtration relay OFF
+#      b) Wait 60 seconds for water to settle
+#      c) Take 3 samples of pH and ORP (500ms apart)
+#      d) Restore filtration to prior state (likely ON)
+# 5. **View Results**: Check "Quiescent pH" and "Quiescent ORP" sensors
+#    - These show the last campaign measurement values
+# 6. **Compare with Normal**: Compare quiescent values with normal readings
+#    - Significant difference may indicate flow-related measurement issues
+#
+# ## Campaign Logs
+#
+# Campaign state transitions are logged at INFO level:
+#
+#   [pool_station.campaign] ========================================
+#   [pool_station.campaign] Starting campaign: pH/ORP Quiescent
+#   [pool_station.campaign] ========================================
+#   [pool_station.campaign] [pH/ORP Quiescent] State: IDLE → PREPARING
+#   [pool_station.campaign] Executing action: relay_filtration → OFF
+#   [pool_station.campaign] [pH/ORP Quiescent] State: PREPARING → WAITING
+#   [pool_station.campaign] [pH/ORP Quiescent] Delay complete (60000 ms)
+#   [pool_station.campaign] [pH/ORP Quiescent] State: WAITING → SAMPLING
+#   [pool_station.campaign] [pH/ORP Quiescent] Sample: ph = 7.234 (burst 1/3)
+#   ...
+#   [pool_station.campaign] [pH/ORP Quiescent] State: SAMPLING → RESTORING
+#   [pool_station.campaign] Restoring: relay_filtration → ON (original state)
+#   [pool_station.campaign] ========================================
+#   [pool_station.campaign] Campaign 'pH/ORP Quiescent' COMPLETE
+#   [pool_station.campaign] ========================================
 #
 # =============================================================================
