@@ -5,6 +5,8 @@
 namespace esphome {
 namespace pool_station {
 
+static const char *const TAG = "pool_station.campaign";  // Required by LOG_* macros
+
 // ============================================================================
 // CampaignAction
 // ============================================================================

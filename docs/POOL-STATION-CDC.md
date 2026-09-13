@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.6 (Lot 7 — C++ compile fixes)  
+> Version: 0.7.7 (Lot 7 — ESPHome 2026.4 compat)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 

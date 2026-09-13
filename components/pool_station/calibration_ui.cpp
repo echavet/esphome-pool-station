@@ -4,6 +4,7 @@ namespace esphome {
 namespace pool_station {
 
 static const char *const UI_TAG = "pool_station.ui";
+static const char *const TAG = "pool_station.ui";  // Required by LOG_* macros
 
 // ============================================================================
 // CalibrationPointXNumber
@@ -361,10 +362,6 @@ void CalibrationInvalidSensor::dump_config() {
 // Lot 7: CalibrationAlgorithmSelect
 // ============================================================================
 
-const std::vector<std::string> CalibrationAlgorithmSelect::ALGORITHM_OPTIONS = {
-    "none", "linear", "polynomial", "piecewise", "dfrobot_orp"
-};
-
 CalibrationType CalibrationAlgorithmSelect::string_to_type(const std::string &str) {
   if (str == "none") return CAL_TYPE_NONE;
   if (str == "linear") return CAL_TYPE_LINEAR;
@@ -394,8 +391,8 @@ std::string CalibrationAlgorithmSelect::type_to_string(CalibrationType type) {
 void CalibrationAlgorithmSelect::setup() {
   ESP_LOGD(UI_TAG, "Setting up CalibrationAlgorithmSelect (channel=%d)", this->channel_type_);
   
-  // Set available options
-  this->traits.set_options(ALGORITHM_OPTIONS);
+  // Set available options - ESPHome 2026.4 requires initializer_list<const char*>
+  this->traits.set_options({"none", "linear", "polynomial", "piecewise", "dfrobot_orp"});
   
   this->update_from_calibration();
 }

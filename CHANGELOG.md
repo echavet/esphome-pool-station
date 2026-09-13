@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-09-13
+
+### Fixed — SelectTraits::set_options + LOG_* TAG
+
+#### CRIT-1: SelectTraits::set_options API Mismatch
+- **Error**: `error: no matching function for call to set_options(const std::vector<std::string>&)`
+- **Root cause**: ESPHome 2026.4 `SelectTraits::set_options()` only accepts `std::initializer_list<const char*>`, not `std::vector<std::string>`
+- **Fix**: Removed `ALGORITHM_OPTIONS` static vector, pass string literals directly:
+  ```cpp
+  this->traits.set_options({"none", "linear", "polynomial", "piecewise", "dfrobot_orp"});
+  ```
+
+#### CRIT-2: LOG_* Macros Missing TAG Variable
+- **Error**: `error: 'TAG' was not declared in this scope` in LOG_BINARY_SENSOR, LOG_SENSOR, etc.
+- **Root cause**: ESPHome LOG_* macros require a `static const char *const TAG` in scope
+- **Fix**: Added TAG definitions to all .cpp files that use these macros:
+  - `calibration_ui.cpp`: `TAG = "pool_station.ui"`
+  - `measurement_gate.cpp`: `TAG = "pool_station.gate"`
+  - `measurement_campaign.cpp`: `TAG = "pool_station.campaign"`
+  - `pool_station.cpp`: Already has TAG via `pool_station.h`
+
+---
+
 ## [0.7.6] - 2026-09-13
 
 ### Fixed — C++ Compilation Errors + Campaign Schema
@@ -599,7 +622,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.6** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.7** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)
