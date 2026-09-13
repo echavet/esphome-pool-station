@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-09-13
+
+### Fixed — C++ Compilation Errors + Campaign Schema
+
+#### CRIT-1: Invalid Hex Literal in calibration_engine.h
+- **Error**: `error: unable to find numeric literal operator 'operator""L10005'`
+- **Root cause**: `0xCAL10005` used 'L' which is not a valid hex digit (0-9, A-F)
+- **Fix**: Changed to `0xCA110005` (uses '1' instead of 'L' for visual similarity)
+- Also fixed legacy magic `0xCAL10002` → `0xCA110002`
+
+#### CRIT-2: CancelToken API Mismatch in pool_station.h
+- **Error**: `error: 'CancelToken' is not a member of 'esphome::CallbackManager<void(float)>'`
+- **Root cause**: ESPHome 2026.4 CallbackManager doesn't expose CancelToken publicly
+- **Fix**: Removed `source_callback_` member - callback lifetime matches component lifetime, no cancellation needed
+
+#### CRIT-3: Campaign Result Sensors Schema (from 0.7.5)
+- **Error**: `KeyError: 'disabled_by_default'` in setup_campaigns
+- **Root cause**: `campaign_result_sensor_schema()` used bare `cv.Schema({...})`
+- **Fix**: Changed to `sensor.sensor_schema(CampaignResultSensor, ...).extend({...})`
+
+---
+
+## [0.7.5] - 2026-09-13
+
+### Fixed — Campaign Result Sensors Schema Validation
+
+(Superseded by 0.7.6 which includes all fixes)
+
+---
+
 ## [0.7.4] - 2026-09-13
 
 ### Fixed — Robust Schema Validation for Dynamic Entities
@@ -569,7 +599,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.4** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.6** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)
