@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9] - 2026-09-13
+
+### Fixed — PoolStationChannelSensor Entity Metadata Setters
+
+#### CRIT: Channel Sensors Missing set_name/set_unit/set_icon/set_state_class Methods
+- **Error**: `error: 'class esphome::pool_station::PoolStationChannelSensor' has no member named 'set_name'; did you mean 'get_name'?`
+- **Also**: `set_unit_of_measurement`, `set_icon`, `set_device_class` errors, and `set_state_class` expecting enum not string
+- **Root cause**: Python codegen called manual setters (`set_name()`, `set_unit_of_measurement()`, etc.) directly on `PoolStationChannelSensor`, but ESPHome 2026.x expects these to be configured via `sensor.register_sensor()` which uses the standard entity helper infrastructure
+- **Affected entities**: All channel sensors (pressure, pH, ORP)
+- **Fix**:
+  - Changed `channel_schema()` to extend `sensor.sensor_schema()` instead of bare `cv.Schema()`
+  - Schema now includes proper `unit_of_measurement`, `accuracy_decimals`, `icon`, `device_class`, `state_class` configuration at schema level
+  - `to_code()` now calls `await sensor.register_sensor(ch_var, ch_conf)` which configures all entity metadata via ESPHome's standard codegen helpers
+  - Removed manual setter calls that aren't available in ESPHome 2026.x sensor API
+- TAG redefinition and SelectTraits fixes from 0.7.7/0.7.8 preserved
+
+---
+
 ## [0.7.8] - 2026-09-13
 
 ### Fixed — TAG Redefinition Compilation Error
@@ -643,7 +661,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.7** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.9** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

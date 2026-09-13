@@ -773,16 +773,24 @@ def campaign_schema():
 
 
 def channel_schema(channel_type):
-    """Generate schema for a channel (pressure, ph, orp)."""
+    """Generate schema for a channel (pressure, ph, orp).
+    
+    Uses sensor.sensor_schema() to properly configure entity metadata
+    (name, unit, icon, state_class, device_class) via ESPHome's standard
+    codegen helpers, avoiding manual setter calls that may not be available
+    in all ESPHome versions.
+    """
     defaults = CHANNEL_DEFAULTS.get(channel_type, {})
     
-    return cv.Schema({
-        cv.GenerateID(): cv.declare_id(PoolStationChannelSensor),
+    return sensor.sensor_schema(
+        PoolStationChannelSensor,
+        unit_of_measurement=defaults.get("unit", ""),
+        accuracy_decimals=defaults.get("accuracy", 2),
+        icon=defaults.get("icon", "mdi:gauge"),
+        device_class=defaults.get("device_class"),
+        state_class=STATE_CLASS_MEASUREMENT,
+    ).extend({
         cv.Required(CONF_SOURCE_ID): cv.use_id(sensor.Sensor),
-        cv.Optional(CONF_NAME): cv.string,
-        cv.Optional(CONF_ICON, default=defaults.get("icon", "mdi:gauge")): cv.icon,
-        cv.Optional(CONF_UNIT_OF_MEASUREMENT, default=defaults.get("unit", "")): cv.string,
-        cv.Optional(CONF_ACCURACY_DECIMALS, default=defaults.get("accuracy", 2)): cv.int_range(0, 5),
         cv.Optional(CONF_UPDATE_INTERVAL, default="1s"): cv.update_interval,
         cv.Optional(CONF_RAW_SENSOR): sensor.sensor_schema(
             unit_of_measurement=defaults.get("raw_unit", "V"),
@@ -829,7 +837,7 @@ def channel_schema(channel_type):
         cv.Optional(CONF_GATE): gate_schema(),
         # Simple sample_when shorthand (alternative to full gate config)
         cv.Optional(CONF_SAMPLE_WHEN): cv.ensure_list(gate_condition_schema()),
-    })
+    }).extend(cv.COMPONENT_SCHEMA)
 
 
 # Calibration mode switch schema
@@ -1379,8 +1387,12 @@ async def to_code(config):
             # Create channel sensor
             ch_var = cg.new_Pvariable(ch_conf[CONF_ID])
             await cg.register_component(ch_var, ch_conf)
+            # Register sensor with ESPHome's standard helper which configures
+            # all entity metadata (name, unit, icon, state_class, device_class)
+            # via the proper codegen calls that ESPHome 2026.x expects
+            await sensor.register_sensor(ch_var, ch_conf)
             
-            # Configure channel
+            # Configure channel-specific properties
             cg.add(ch_var.set_channel_type(channel_type))
             cg.add(ch_var.set_source_sensor(source_sensor))
             cg.add(ch_var.set_parent(var))
@@ -1389,16 +1401,6 @@ async def to_code(config):
             # Set preferences key for calibration persistence
             prefs_key = generate_preferences_key(str(config[CONF_ID]), channel_type)
             cg.add(ch_var.set_preferences_key(prefs_key))
-            
-            # Set sensor properties
-            if CONF_NAME in ch_conf:
-                cg.add(ch_var.set_name(ch_conf[CONF_NAME]))
-            cg.add(ch_var.set_unit_of_measurement(ch_conf[CONF_UNIT_OF_MEASUREMENT]))
-            cg.add(ch_var.set_accuracy_decimals(ch_conf[CONF_ACCURACY_DECIMALS]))
-            cg.add(ch_var.set_icon(ch_conf[CONF_ICON]))
-            cg.add(ch_var.set_state_class(STATE_CLASS_MEASUREMENT))
-            if defaults.get("device_class"):
-                cg.add(ch_var.set_device_class(defaults["device_class"]))
             
             # Create raw sensor if configured
             if CONF_RAW_SENSOR in ch_conf:

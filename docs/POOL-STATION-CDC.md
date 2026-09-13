@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.8 (Lot 7 — TAG redefinition fix)  
+> Version: 0.7.9 (Lot 7 — Channel sensor entity metadata fix)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 
