@@ -14,6 +14,7 @@ from esphome.const import (
     CONF_UPDATE_INTERVAL,
     CONF_ICON,
     CONF_ENTITY_CATEGORY,
+    CONF_DISABLED_BY_DEFAULT,
     ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_VOLT,
@@ -887,6 +888,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_NAME: f"{channel_key.title()} Capture Point {point_idx + 1}",
                 CONF_ICON: "mdi:crosshairs-gps",
                 CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
+                CONF_DISABLED_BY_DEFAULT: False,
             }
             btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
             await button.register_button(btn_var, btn_conf)
@@ -903,6 +905,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_ICON: "mdi:alpha-x-circle",
                 CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
                 CONF_UNIT_OF_MEASUREMENT: "V",
+                CONF_DISABLED_BY_DEFAULT: False,
             }
             num_x_var = cg.new_Pvariable(num_x_conf[CONF_ID])
             await number.register_number(
@@ -925,6 +928,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_ICON: "mdi:alpha-y-circle",
                 CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
                 CONF_UNIT_OF_MEASUREMENT: defaults.get("y_unit", ""),
+                CONF_DISABLED_BY_DEFAULT: False,
             }
             num_y_var = cg.new_Pvariable(num_y_conf[CONF_ID])
             await number.register_number(
@@ -946,6 +950,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             CONF_NAME: f"{channel_key.title()} Save Calibration",
             CONF_ICON: "mdi:content-save",
             CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
+            CONF_DISABLED_BY_DEFAULT: False,
         }
         save_var = cg.new_Pvariable(save_conf[CONF_ID])
         await button.register_button(save_var, save_conf)
@@ -961,6 +966,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             CONF_ICON: "mdi:arrow-collapse-vertical",
             CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
             CONF_UNIT_OF_MEASUREMENT: "mV",
+            CONF_DISABLED_BY_DEFAULT: False,
         }
         mid_var = cg.new_Pvariable(mid_conf[CONF_ID])
         await number.register_number(
@@ -982,6 +988,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             CONF_ICON: "mdi:delta",
             CONF_ENTITY_CATEGORY: ENTITY_CATEGORY_CONFIG,
             CONF_UNIT_OF_MEASUREMENT: "mV",
+            CONF_DISABLED_BY_DEFAULT: False,
         }
         offset_var = cg.new_Pvariable(offset_conf[CONF_ID])
         await number.register_number(

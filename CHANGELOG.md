@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-09-13
+
+### Fixed — Missing Entity Schema Defaults (KeyError: 'disabled_by_default')
+
+#### CRIT: Dynamic Entity Configs Missing Required Keys
+- **Root cause**: Capturer UI entities created dynamically in loops (capture buttons, point X/Y numbers, save button, DFRobot mid/offset numbers) were using bare dictionaries instead of passing through ESPHome entity schemas
+- ESPHome 2026.4.x `entity_helpers.py` requires `disabled_by_default` key in entity configs
+- Dynamic configs lacked this key, causing: `KeyError: 'disabled_by_default'`
+- **Fix**: Added `CONF_DISABLED_BY_DEFAULT: False` to all 6 dynamically created entity configs in `setup_capturer_ui()`
+- Entities created via YAML schemas (`button.button_schema()`, etc.) already have defaults from schema validation
+
+---
+
 ## [0.7.2] - 2026-09-13
 
 ### Fixed — Codegen Double Registration Bug
@@ -533,7 +546,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.2** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.3** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)
