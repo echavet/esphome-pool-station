@@ -150,6 +150,83 @@ void PoolStationComponent::register_cal_invalid_sensor(CalibrationInvalidSensor 
   this->cal_invalid_sensors_[channel_type] = sensor;
 }
 
+void PoolStationComponent::register_algorithm_select(CalibrationAlgorithmSelect *sel, uint8_t channel_type) {
+  if (sel == nullptr) return;
+  this->algorithm_selects_[channel_type] = sel;
+}
+
+void PoolStationComponent::register_point_count_number(CalibrationPointCountNumber *num, uint8_t channel_type) {
+  if (num == nullptr) return;
+  this->point_count_numbers_[channel_type] = num;
+}
+
+void PoolStationComponent::register_draft_pending_sensor(DraftPendingSensor *sensor, uint8_t channel_type) {
+  if (sensor == nullptr) return;
+  this->draft_pending_sensors_[channel_type] = sensor;
+}
+
+void PoolStationComponent::refresh_calibration_ui(uint8_t channel_type) {
+  auto x_it = this->point_x_numbers_.find(channel_type);
+  if (x_it != this->point_x_numbers_.end()) {
+    for (auto &kv : x_it->second) {
+      if (kv.second != nullptr) {
+        kv.second->update_from_calibration();
+      }
+    }
+  }
+
+  auto y_it = this->point_y_numbers_.find(channel_type);
+  if (y_it != this->point_y_numbers_.end()) {
+    for (auto &kv : y_it->second) {
+      if (kv.second != nullptr) {
+        kv.second->update_from_calibration();
+      }
+    }
+  }
+
+  auto algo_it = this->algorithm_selects_.find(channel_type);
+  if (algo_it != this->algorithm_selects_.end() && algo_it->second != nullptr) {
+    algo_it->second->update_from_calibration();
+  }
+
+  auto count_it = this->point_count_numbers_.find(channel_type);
+  if (count_it != this->point_count_numbers_.end() && count_it->second != nullptr) {
+    count_it->second->update_from_calibration();
+  }
+
+  auto mid_it = this->dfrobot_mid_numbers_.find(channel_type);
+  if (mid_it != this->dfrobot_mid_numbers_.end() && mid_it->second != nullptr) {
+    mid_it->second->update_from_calibration();
+  }
+
+  auto offset_it = this->dfrobot_offset_numbers_.find(channel_type);
+  if (offset_it != this->dfrobot_offset_numbers_.end() && offset_it->second != nullptr) {
+    offset_it->second->update_from_calibration();
+  }
+
+  auto invalid_it = this->cal_invalid_sensors_.find(channel_type);
+  if (invalid_it != this->cal_invalid_sensors_.end() && invalid_it->second != nullptr) {
+    invalid_it->second->update_from_calibration();
+  }
+
+  auto draft_it = this->draft_pending_sensors_.find(channel_type);
+  if (draft_it != this->draft_pending_sensors_.end() && draft_it->second != nullptr) {
+    draft_it->second->update_from_calibration();
+  }
+}
+
+void PoolStationComponent::publish_captured_point_x(uint8_t channel_type, uint8_t point_index, float x) {
+  auto ch_it = this->point_x_numbers_.find(channel_type);
+  if (ch_it == this->point_x_numbers_.end()) {
+    return;
+  }
+  auto num_it = ch_it->second.find(point_index);
+  if (num_it == ch_it->second.end() || num_it->second == nullptr) {
+    return;
+  }
+  num_it->second->publish_state(x);
+}
+
 void PoolStationComponent::register_campaign(MeasurementCampaign *campaign) {
   if (campaign == nullptr) return;
   
@@ -256,6 +333,9 @@ void PoolStationChannelSensor::setup() {
       this->publish_calibration_temperature();
     }
   }
+
+  // Numbers/selects often setup() before prefs are loaded; push engine state now.
+  this->notify_calibration_updated();
   
   // Initialize diagnostics (Lot 4)
   if (this->diagnostics_enabled_) {
@@ -521,9 +601,11 @@ const DiagnosticsFlags &PoolStationChannelSensor::get_diagnostics_flags() const 
 }
 
 void PoolStationChannelSensor::notify_calibration_updated() {
-  // This is called after a capture button press or manual point edit
-  // We could trigger number entity updates here if needed
-  ESP_LOGD(TAG, "Calibration updated for channel %s", this->get_channel_type_name());
+  ESP_LOGD(TAG, "Calibration updated for channel %s — refreshing Capturer UI",
+           this->get_channel_type_name());
+  if (this->parent_ != nullptr) {
+    this->parent_->refresh_calibration_ui(static_cast<uint8_t>(this->channel_type_));
+  }
 }
 
 bool PoolStationChannelSensor::is_gated() const {

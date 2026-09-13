@@ -31,7 +31,9 @@ void CalibrationPointXNumber::update_from_calibration() {
   if (engine == nullptr) return;
   
   CalibrationPoint pt = engine->get_point(this->point_index_);
-  if (pt.is_valid()) {
+  // Publish X whenever it is finite. Capture writes X first; Y may still be NaN.
+  // Requiring is_valid() (both axes) left HA at `unknown` after "Capturer".
+  if (!std::isnan(pt.x)) {
     this->publish_state(pt.x);
   } else {
     this->publish_state(NAN);
@@ -92,7 +94,7 @@ void CalibrationPointYNumber::update_from_calibration() {
   if (engine == nullptr) return;
   
   CalibrationPoint pt = engine->get_point(this->point_index_);
-  if (pt.is_valid()) {
+  if (!std::isnan(pt.y)) {
     this->publish_state(pt.y);
   } else {
     this->publish_state(NAN);
@@ -257,8 +259,11 @@ void CalibrationCaptureButton::press_action() {
   
   engine->set_point(this->point_index_, raw_value, y_value);
   
-  // Notify the parent to update any linked number entities
+  // Refresh all Capturer widgets, then force the captured slot's X number
+  // so HA shows the voltage immediately (notify can miss this slot if the
+  // engine re-sorts by X or the point is not fully valid yet).
   channel->notify_calibration_updated();
+  this->parent_->publish_captured_point_x(this->channel_type_, this->point_index_, raw_value);
   
   ESP_LOGI(TAG, "Captured raw=%.4fV into point %d for channel %d", 
            raw_value, this->point_index_, this->channel_type_);
@@ -301,6 +306,7 @@ void CalibrationSaveButton::press_action() {
   
   // Update calibration temp sensor if configured
   channel->publish_calibration_temperature();
+  channel->notify_calibration_updated();
   
   if (!std::isnan(water_temp)) {
     ESP_LOGI(TAG, "Saved calibration for channel %d to flash (Tw=%.1f°C)", 
@@ -319,14 +325,7 @@ void CalibrationInvalidSensor::setup() {
   this->publish_state(false);
 }
 
-void CalibrationInvalidSensor::loop() {
-  // Check every 1 second to avoid excessive updates
-  uint32_t now = millis();
-  if (now - this->last_check_ < 1000) {
-    return;
-  }
-  this->last_check_ = now;
-  
+void CalibrationInvalidSensor::update_from_calibration() {
   if (this->parent_ == nullptr) return;
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
@@ -335,20 +334,37 @@ void CalibrationInvalidSensor::loop() {
   CalibrationEngine *engine = channel->get_calibration_engine();
   if (engine == nullptr) return;
   
-  // Check if calibration is invalid (insufficient points or type=none)
   bool is_invalid = !engine->is_valid();
+  const bool changed = is_invalid != this->last_state_;
+  this->last_state_ = is_invalid;
+  this->publish_state(is_invalid);
   
-  // Only publish if state changed
-  if (is_invalid != this->last_state_) {
-    this->last_state_ = is_invalid;
-    this->publish_state(is_invalid);
-    
+  if (changed) {
     if (is_invalid) {
       ESP_LOGW(TAG, "Channel %d calibration is INVALID (need %d points, have %zu)",
                this->channel_type_, engine->get_minimum_points(), engine->get_point_count());
     } else {
       ESP_LOGI(TAG, "Channel %d calibration is valid", this->channel_type_);
     }
+  }
+}
+
+void CalibrationInvalidSensor::loop() {
+  // Check every 1 second to avoid excessive updates
+  uint32_t now = millis();
+  if (now - this->last_check_ < 1000) {
+    return;
+  }
+  this->last_check_ = now;
+
+  if (this->parent_ == nullptr) return;
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+
+  if ((!engine->is_valid()) != this->last_state_) {
+    this->update_from_calibration();
   }
 }
 
@@ -679,14 +695,7 @@ void DraftPendingSensor::setup() {
   this->publish_state(false);
 }
 
-void DraftPendingSensor::loop() {
-  // Check every 500ms
-  uint32_t now = millis();
-  if (now - this->last_check_ < 500) {
-    return;
-  }
-  this->last_check_ = now;
-  
+void DraftPendingSensor::update_from_calibration() {
   if (this->parent_ == nullptr) return;
   
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
@@ -696,14 +705,31 @@ void DraftPendingSensor::loop() {
   if (engine == nullptr) return;
   
   bool has_changes = engine->has_draft_changes();
+  const bool changed = has_changes != this->last_state_;
+  this->last_state_ = has_changes;
+  this->publish_state(has_changes);
   
-  if (has_changes != this->last_state_) {
-    this->last_state_ = has_changes;
-    this->publish_state(has_changes);
-    
-    if (has_changes) {
-      ESP_LOGD(TAG, "Channel %d has uncommitted draft changes", this->channel_type_);
-    }
+  if (changed && has_changes) {
+    ESP_LOGD(TAG, "Channel %d has uncommitted draft changes", this->channel_type_);
+  }
+}
+
+void DraftPendingSensor::loop() {
+  // Check every 500ms
+  uint32_t now = millis();
+  if (now - this->last_check_ < 500) {
+    return;
+  }
+  this->last_check_ = now;
+
+  if (this->parent_ == nullptr) return;
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+
+  if (engine->has_draft_changes() != this->last_state_) {
+    this->update_from_calibration();
   }
 }
 

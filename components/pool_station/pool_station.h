@@ -138,6 +138,17 @@ class PoolStationComponent : public PollingComponent {
   void register_dfrobot_mid_number(DFRobotMidNumber *num, uint8_t channel_type);
   void register_dfrobot_offset_number(DFRobotOffsetNumber *num, uint8_t channel_type);
   void register_cal_invalid_sensor(CalibrationInvalidSensor *sensor, uint8_t channel_type);
+  void register_algorithm_select(CalibrationAlgorithmSelect *sel, uint8_t channel_type);
+  void register_point_count_number(CalibrationPointCountNumber *num, uint8_t channel_type);
+  void register_draft_pending_sensor(DraftPendingSensor *sensor, uint8_t channel_type);
+
+  // Push engine state to all registered Capturer widgets for this channel.
+  void refresh_calibration_ui(uint8_t channel_type);
+
+  // Publish a captured raw voltage onto the HA X number for that slot.
+  // Used after Capturer so the Étalonnage X field updates even if the
+  // engine point is not yet fully valid (Y still NaN) or was re-sorted.
+  void publish_captured_point_x(uint8_t channel_type, uint8_t point_index, float x);
 
   // Campaign registration (Lot 6)
   void register_campaign(MeasurementCampaign *campaign);
@@ -166,6 +177,9 @@ class PoolStationComponent : public PollingComponent {
   std::map<uint8_t, DFRobotMidNumber *> dfrobot_mid_numbers_;
   std::map<uint8_t, DFRobotOffsetNumber *> dfrobot_offset_numbers_;
   std::map<uint8_t, CalibrationInvalidSensor *> cal_invalid_sensors_;
+  std::map<uint8_t, CalibrationAlgorithmSelect *> algorithm_selects_;
+  std::map<uint8_t, CalibrationPointCountNumber *> point_count_numbers_;
+  std::map<uint8_t, DraftPendingSensor *> draft_pending_sensors_;
 
   // Campaigns (Lot 6)
   std::map<std::string, MeasurementCampaign *> campaigns_;

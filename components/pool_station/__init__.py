@@ -490,13 +490,19 @@ def capturer_schema(channel_type):
     - algorithm_select: Select entity to change calibration type at runtime
     - add_point_button: Button to add a new calibration point
     - remove_point_button: Button to remove the last calibration point
-    - point_count_number: Number entity to control point count
+    - point_count_number: Number entity showing the live CalibrationEngine count
     - draft_mode: Enable draft/commit workflow (default: false for backward compat)
     - commit_button: Button to commit draft changes to live
     - discard_button: Button to discard draft changes
     - draft_pending: Binary sensor showing uncommitted draft changes
+
+    point_count is the max number of HA number/button slots codegen'd at compile
+    time (1-10). Recommend 5–10 when using add/remove. Add/remove cannot create
+    new HA entities beyond these preallocated slots. point_count_number reports
+    the live engine count, which may be smaller than the slot count.
     """
     return cv.Schema({
+        # Max preallocated HA slots (not the live engine count).
         cv.Optional(CONF_POINT_COUNT, default=3): cv.int_range(min=1, max=10),
         cv.Optional(CONF_CAPTURE_BUTTONS, default=True): cv.boolean,
         cv.Optional(CONF_POINT_NUMBERS, default=True): cv.boolean,
@@ -911,6 +917,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         return
     
     defaults = CHANNEL_DEFAULTS.get(channel_key, {})
+    # Compile-time HA slot count. Add/remove cannot create entities past this.
     point_count = capturer_conf.get(CONF_POINT_COUNT, 3)
     
     # Pre-create schemas with defaults for dynamic entities
@@ -975,16 +982,18 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_NAME: f"{channel_key.title()} Cal Point {point_idx + 1} X",
             })
             num_x_var = cg.new_Pvariable(num_x_conf[CONF_ID])
+            # Parent/index before register_component so setup() can publish.
+            cg.add(num_x_var.set_parent(parent_var))
+            cg.add(num_x_var.set_channel_type(channel_type))
+            cg.add(num_x_var.set_point_index(point_idx))
+            cg.add(parent_var.register_point_x_number(num_x_var, channel_type, point_idx))
+            await cg.register_component(num_x_var, num_x_conf)
             await number.register_number(
                 num_x_var, num_x_conf,
                 min_value=-10.0,
                 max_value=10.0,
                 step=0.0001,
             )
-            cg.add(num_x_var.set_parent(parent_var))
-            cg.add(num_x_var.set_channel_type(channel_type))
-            cg.add(num_x_var.set_point_index(point_idx))
-            cg.add(parent_var.register_point_x_number(num_x_var, channel_type, point_idx))
         
         # Point Y number (calibrated value)
         if capturer_conf.get(CONF_POINT_NUMBERS, True):
@@ -995,16 +1004,17 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_NAME: f"{channel_key.title()} Cal Point {point_idx + 1} Y",
             })
             num_y_var = cg.new_Pvariable(num_y_conf[CONF_ID])
+            cg.add(num_y_var.set_parent(parent_var))
+            cg.add(num_y_var.set_channel_type(channel_type))
+            cg.add(num_y_var.set_point_index(point_idx))
+            cg.add(parent_var.register_point_y_number(num_y_var, channel_type, point_idx))
+            await cg.register_component(num_y_var, num_y_conf)
             await number.register_number(
                 num_y_var, num_y_conf,
                 min_value=defaults.get("y_min", -1000.0),
                 max_value=defaults.get("y_max", 1000.0),
                 step=0.01,
             )
-            cg.add(num_y_var.set_parent(parent_var))
-            cg.add(num_y_var.set_channel_type(channel_type))
-            cg.add(num_y_var.set_point_index(point_idx))
-            cg.add(parent_var.register_point_y_number(num_y_var, channel_type, point_idx))
     
     # Save button
     if capturer_conf.get(CONF_SAVE_BUTTON, True):
@@ -1069,6 +1079,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         # a current value that exists in the option list.
         cg.add(algo_var.set_parent(parent_var))
         cg.add(algo_var.set_channel_type(channel_type))
+        cg.add(parent_var.register_algorithm_select(algo_var, channel_type))
         await cg.register_component(algo_var, algo_conf)
         # HA discovery uses this list; empty options leave state unknown.
         # Options are per-channel: dfrobot_orp is ORP-only.
@@ -1104,6 +1115,8 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         )
         cg.add(count_var.set_parent(parent_var))
         cg.add(count_var.set_channel_type(channel_type))
+        cg.add(parent_var.register_point_count_number(count_var, channel_type))
+        await cg.register_component(count_var, count_conf)
     
     # Draft mode configuration
     draft_mode_enabled = capturer_conf.get(CONF_DRAFT_MODE, False)
@@ -1132,6 +1145,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         await binary_sensor.register_binary_sensor(pending_var, pending_conf)
         cg.add(pending_var.set_parent(parent_var))
         cg.add(pending_var.set_channel_type(channel_type))
+        cg.add(parent_var.register_draft_pending_sensor(pending_var, channel_type))
 
 
 async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):

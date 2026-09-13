@@ -236,11 +236,19 @@ pool_station:
           name: "Pressure Out Of Range"
       
       # Capturer UI - allows editing calibration from HA
+      # point_count = max preallocated HA slots (Add/Remove cannot create more).
+      # point_count_number = live CalibrationEngine count.
       capturer:
-        point_count: 2
+        point_count: 5
         capture_buttons: true
         point_numbers: true
         save_button: true
+        add_point_button:
+          name: "Pressure Add Point"
+        remove_point_button:
+          name: "Pressure Remove Point"
+        point_count_number:
+          name: "Pressure Point Count"
       
       # Calibration invalid indicator
       cal_invalid:
@@ -344,9 +352,11 @@ pool_station:
       calibration_temp_sensor:
         name: "Pool pH Calibration Tw"
       
-      # Capturer UI - 3 points for pH 4/7/10 calibration
+      # Capturer UI — 5 HA slots so Add Point can show extra points.
+      # Seed calibration still uses 3 points (pH 4/7/10); point_count_number
+      # reports the live engine count.
       capturer:
-        point_count: 3
+        point_count: 5
         capture_buttons: true
         point_numbers: true
         save_button: true
@@ -681,11 +691,12 @@ pool_station:
 # Dynamic point management from the UI:
 #
 # capturer:
+#   point_count: 5               # Max HA slots (recommend 5–10). Not the live count.
 #   add_point_button:            # Adds a point with x=0, y=0
 #     name: "pH Add Point"
 #   remove_point_button:         # Removes the last point
 #     name: "pH Remove Point"
-#   point_count_number:          # Resize to exact count (1-10)
+#   point_count_number:          # Live engine count (+ optional resize 1-10)
 #     name: "pH Point Count"
 #
 # ## Draft/Commit Workflow
