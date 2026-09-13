@@ -288,9 +288,26 @@ void CalibrationSaveButton::press_action() {
   CalibrationEngine *engine = channel->get_calibration_engine();
   if (engine == nullptr) return;
   
+  // Lot 5: Capture water temperature at calibration time
+  float water_temp = NAN;
+  if (this->parent_->has_water_temperature()) {
+    water_temp = this->parent_->get_water_temperature();
+    engine->set_calibration_temperature(water_temp);
+    ESP_LOGI(UI_TAG, "Captured Tw=%.1f°C at calibration time for channel %d", 
+             water_temp, this->channel_type_);
+  }
+  
   engine->save_to_preferences();
   
-  ESP_LOGI(UI_TAG, "Saved calibration for channel %d to flash", this->channel_type_);
+  // Update calibration temp sensor if configured
+  channel->publish_calibration_temperature();
+  
+  if (!std::isnan(water_temp)) {
+    ESP_LOGI(UI_TAG, "Saved calibration for channel %d to flash (Tw=%.1f°C)", 
+             this->channel_type_, water_temp);
+  } else {
+    ESP_LOGI(UI_TAG, "Saved calibration for channel %d to flash", this->channel_type_);
+  }
 }
 
 // ============================================================================

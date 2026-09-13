@@ -23,6 +23,16 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 
 ## Current Status
 
+**Lot 5** — Water Temperature Reference + Compensation:
+- ✅ Top-level `water_temperature: sensor_id` binding to Dallas probe
+- ✅ Per-channel `temperature_compensation:` block for pH and ORP
+- ✅ pH compensation: Nernstian slope model with documented formula
+- ✅ ORP compensation: Optional linear model (disabled by default)
+- ✅ Runtime switch entity to enable/disable compensation
+- ✅ Calibration metadata: Tw stored at calibration save time
+- ✅ `calibration_temp_sensor` diagnostic shows Tw at last calibration
+- ✅ Pipeline order: raw → median → calibrate → temp_comp → guards → publish
+
 **Lot 4** — Diagnostics (noise / drift / flags):
 - ✅ Sliding window statistics: mean, σ (stddev), peak-to-peak
 - ✅ Optional diagnostic sensors (only created if declared in YAML)
@@ -306,6 +316,28 @@ raw → [median window] → raw_sensor → calibrate → calibrated_sensor
 
 > **Calibration Mode**: When ON, filters are bypassed for ~1s raw response during calibration capture.
 
+### Temperature Compensation Configuration (Lot 5)
+
+```yaml
+channels:
+  ph:
+    # ... source, calibration, filters, etc.
+    
+    temperature_compensation:
+      enabled: true                 # Enable compensation (default: false)
+      reference_temperature: 25.0   # Standard calibration temp in °C
+      neutral_ph: 7.0               # Isopotential point (pH only)
+      orp_coefficient: 0.0          # Linear coeff in mV/°C (ORP only, 0=off)
+      
+      # Optional runtime switch to enable/disable
+      enable_switch:
+        name: "pH Temp Compensation"
+    
+    # Shows water temp at last calibration save
+    calibration_temp_sensor:
+      name: "pH Calibration Tw"
+```
+
 ### Diagnostics Configuration (Lot 4)
 
 ```yaml
@@ -383,11 +415,93 @@ Use calibration mode when:
 | 1 | ADS1115 binding, raw values, calibration mode | ✅ Done |
 | 2 | N-point calibration, Capturer UI, persistence | ✅ Done |
 | 3 | j5-like filters (median, max_jump, streak, clamp) | ✅ Done |
-| **4** | **Diagnostics (noise σ/ptp, stuck, out_of_range flags)** | ✅ **Current** |
-| 5 | Water temperature compensation (Tw) | 📋 Planned |
+| 4 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
+| **5** | **Water temperature compensation (Tw)** | ✅ **Current** |
 | 6 | Gates/campaigns (conditional sampling) | 📋 Planned |
 | 7 | HA polish, runtime algo select, services | 📋 Planned |
 | 8 | (Optional) Interference detection, EZO support | 🔮 Future |
+
+## Lot 5 — What's New
+
+### Water Temperature Binding
+
+```yaml
+pool_station:
+  # Bind water temperature sensor for compensation
+  water_temperature:
+    sensor_id: water_temp  # Reference to Dallas DS18B20 sensor
+```
+
+> **IMPORTANT**: The water temperature sensor **must** use a fixed ROM address, not index-based binding. See [SENSOR-IDENTITY.md](docs/SENSOR-IDENTITY.md).
+
+### pH Temperature Compensation (Nernstian Model)
+
+The Nernst equation's electrode slope is temperature-dependent. This module compensates pH readings to a reference temperature using the documented formula:
+
+```
+pH_compensated = neutral_ph + (pH_measured - neutral_ph) × slope_ratio
+slope_ratio = (T_ref + 273.15) / (T_measured + 273.15)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `reference_temperature` | 25.0°C | Standard calibration temperature |
+| `neutral_ph` | 7.0 | Isopotential point (T has no effect at this pH) |
+
+**Example**: At 30°C water with pH measured = 7.50:
+- slope_ratio = 298.15 / 303.15 = 0.9835
+- pH_compensated = 7.0 + (7.50 - 7.0) × 0.9835 = **7.492**
+
+### ORP Temperature Compensation (Optional)
+
+ORP compensation uses a simple linear model, **disabled by default**:
+
+```
+ORP_compensated = ORP_measured - orp_coefficient × (T_measured - T_ref)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `orp_coefficient` | 0.0 mV/°C | Linear temperature coefficient (0 = disabled) |
+
+### Temperature Compensation Configuration
+
+```yaml
+channels:
+  ph:
+    temperature_compensation:
+      enabled: true                    # Enable by default
+      reference_temperature: 25.0      # Standard calibration temp
+      neutral_ph: 7.0                  # Isopotential point
+      
+      # Runtime switch to enable/disable from Home Assistant
+      enable_switch:
+        name: "Pool pH Temp Compensation"
+    
+    # Shows water temperature at last calibration save
+    calibration_temp_sensor:
+      name: "Pool pH Calibration Tw"
+```
+
+### Calibration Temperature Metadata
+
+When pressing the Save Calibration button, the current water temperature is automatically stored with the calibration data:
+
+- Persisted to flash with calibration points
+- Displayed via `calibration_temp_sensor` entity
+- Logged at calibration save time
+- Useful for tracking calibration conditions
+
+### Pipeline Order
+
+```
+raw → [median] → raw_sensor → calibrate → TEMP_COMP → calibrated_sensor
+    → [clamp] → [jump guard] → main entity
+```
+
+Temperature compensation is applied **after** calibration but **before** guards, ensuring compensation works on properly calibrated values.
+
+---
 
 ## Lot 4 — What's New
 

@@ -1,6 +1,6 @@
-# Pool Station — Example Configuration (Lot 4)
+# Pool Station — Example Configuration (Lot 5)
 # 
-# This configuration demonstrates Lot 2, 3, and 4 features:
+# This configuration demonstrates Lot 2, 3, 4, and 5 features:
 #   - N-point calibration with multiple algorithms
 #   - Capturer UI for calibration from Home Assistant
 #   - Calibration persistence across reboots
@@ -8,12 +8,17 @@
 #   - Lot 3: Filters (median window, jump guard, min/max clamp)
 #   - Lot 3: Calibrated sensor (pre-guard diagnostic)
 #   - Lot 4: Diagnostics (noise detection, stuck detection, out-of-range flags)
+#   - Lot 5: Temperature compensation with Nernstian model for pH
+#   - Lot 5: Calibration temperature metadata (Tw at save time)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
 #   - I2C: SDA=GPIO5, SCL=GPIO4
 #   - ADS1115 @0x48: A0=pressure, A2=pH, A3=ORP
 #   - Dallas DS18B20: water (GPIO17), air sensors (GPIO13)
+#
+# IMPORTANT: Temperature sensors MUST be bound by fixed address per SENSOR-IDENTITY.md
+# Water temperature sensor: 0xc80200000000xxxx on GPIO17 (NEVER use index: 0)
 #
 # See docs/SENSOR-IDENTITY.md for address binding rules.
 
@@ -131,15 +136,24 @@ sensor:
   # ---------------------------------------------------------------------------
   # Temperature Sensors — ADDRESS-BOUND (see SENSOR-IDENTITY.md)
   # ---------------------------------------------------------------------------
-  # Water temperature — immersed probe
-  # IMPORTANT: Use YOUR actual ROM address, not this placeholder
+  # Water temperature — immersed probe on GPIO17
+  # CRITICAL: Must use FIXED ADDRESS per SENSOR-IDENTITY.md
+  # The address below is the example from docs; replace with YOUR actual ROM address.
+  # Run `esphome logs` to see discovered addresses, then bind by address, never index.
+  #
+  # Example format: 0xAABBCCDDEEFF1128 (last byte is usually 28 for DS18B20)
+  # Actual address for Eric's water probe: 0xc802000000001c28
   - platform: dallas_temp
     one_wire_id: onewire_water
-    address: 0xc80200000000xxxx  # Replace with actual address
+    address: 0xc802000000001c28  # ← YOUR immersed water probe address
     name: "Water Temperature"
     id: water_temp
     unit_of_measurement: "°C"
     accuracy_decimals: 2
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
 
   # Air temperature — pump enclosure
   - platform: dallas_temp
@@ -300,6 +314,30 @@ pool_station:
         out_of_range:
           name: "Pool pH Out Of Range"
       
+      # =====================================================================
+      # Temperature Compensation (Lot 5) — Nernstian pH correction
+      # =====================================================================
+      # pH electrodes have temperature-dependent slope (Nernst equation).
+      # This compensates readings toward a reference temperature (default 25°C).
+      # 
+      # Formula: pH_comp = neutral_ph + (pH_meas - neutral_ph) × slope_ratio
+      # where slope_ratio = (T_ref + 273.15) / (T_water + 273.15)
+      #
+      # At neutral_ph (7.0), temperature has NO effect (isopotential point).
+      # Away from 7.0, warmer water gives slightly lower compensated pH.
+      temperature_compensation:
+        enabled: true                    # Enable compensation by default
+        reference_temperature: 25.0      # Standard calibration temp (°C)
+        neutral_ph: 7.0                  # Isopotential point
+        
+        # Runtime switch to enable/disable from Home Assistant
+        enable_switch:
+          name: "Pool pH Temp Compensation"
+      
+      # Diagnostic: shows water temperature at last calibration save
+      calibration_temp_sensor:
+        name: "Pool pH Calibration Tw"
+      
       # Capturer UI - 3 points for pH 4/7/10 calibration
       capturer:
         point_count: 3
@@ -365,6 +403,29 @@ pool_station:
           name: "Pool ORP Stuck"
         out_of_range:
           name: "Pool ORP Out Of Range"
+      
+      # =====================================================================
+      # Temperature Compensation (Lot 5) — ORP correction (optional)
+      # =====================================================================
+      # ORP temperature compensation is less standardized than pH.
+      # A simple linear model is available but DISABLED by default:
+      #
+      # Formula: ORP_comp = ORP_meas - orp_coefficient × (T_water - T_ref)
+      #
+      # Typical coefficients range 0.5-2.0 mV/°C depending on electrode.
+      # Set orp_coefficient to 0 to disable (default).
+      temperature_compensation:
+        enabled: false                   # Disabled by default for ORP
+        reference_temperature: 25.0
+        orp_coefficient: 0.0             # mV/°C (0 = no compensation)
+        
+        # Uncomment to enable runtime control:
+        # enable_switch:
+        #   name: "Pool ORP Temp Compensation"
+      
+      # Diagnostic: shows water temperature at last calibration save
+      calibration_temp_sensor:
+        name: "Pool ORP Calibration Tw"
       
       # Capturer UI - includes mid/offset numbers for DFRobot
       capturer:
@@ -504,5 +565,68 @@ pool_station:
 #   Use for: DFRobot ORP modules or similar
 #
 # - exponential, logarithmic, power: TODO (not implemented yet)
+#
+# =============================================================================
+# TEMPERATURE COMPENSATION (Lot 5)
+# =============================================================================
+#
+# ## pH Temperature Compensation (Nernstian Model)
+#
+# The Nernst equation's electrode slope is temperature-dependent:
+#
+#   slope(T) ≈ 59.16 × (T + 273.15) / 298.15  [mV/pH]
+#
+# The compensation formula normalizes readings to a reference temperature:
+#
+#   pH_compensated = neutral_ph + (pH_measured - neutral_ph) × slope_ratio
+#
+# where:
+#   - slope_ratio = (T_ref + 273.15) / (T_measured + 273.15)
+#   - T_ref = reference_temperature (default 25°C, standard calibration temp)
+#   - T_measured = current water temperature from water_temperature sensor
+#   - neutral_ph = isopotential point (default 7.0, where T has no effect)
+#
+# Example at 30°C water:
+#   - pH measured: 7.50
+#   - slope_ratio = 298.15 / 303.15 = 0.9835
+#   - pH_compensated = 7.0 + (7.50 - 7.0) × 0.9835 = 7.492
+#
+# ## ORP Temperature Compensation (Linear Model, optional)
+#
+# ORP compensation is less standardized. A simple linear model is provided:
+#
+#   ORP_compensated = ORP_measured - orp_coefficient × (T_measured - T_ref)
+#
+# The orp_coefficient is in mV/°C. Typical range: 0.5-2.0 mV/°C.
+# Default is 0 (disabled) because ORP compensation varies by electrode.
+#
+# ## Configuration
+#
+# temperature_compensation:
+#   enabled: true/false           # Enable compensation (or use switch)
+#   reference_temperature: 25.0   # Standard calibration temp (°C)
+#   neutral_ph: 7.0               # Isopotential point (pH only)
+#   orp_coefficient: 0.0          # Linear coefficient (ORP only, mV/°C)
+#   enable_switch:                # Optional runtime switch entity
+#     name: "pH Temp Compensation"
+#
+# ## Pipeline Order (Lot 5)
+#
+# raw → median → calibrate → TEMP_COMP → calibrated_sensor → clamp → jump → publish
+#
+# Temperature compensation is applied AFTER calibration but BEFORE guards.
+# This ensures the compensation works on properly calibrated values.
+#
+# ## Calibration Temperature Metadata
+#
+# When saving calibration (pressing Save button), the current water temperature
+# is stored with the calibration data. This allows:
+#
+# 1. Tracking what temperature the calibration was done at
+# 2. Diagnostic display via calibration_temp_sensor entity
+# 3. Future: auto-suggest recalibration if Tw differs significantly
+#
+# calibration_temp_sensor:
+#   name: "pH Calibration Tw"    # Shows Tw at last calibration save
 #
 # =============================================================================

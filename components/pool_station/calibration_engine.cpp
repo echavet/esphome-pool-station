@@ -369,10 +369,13 @@ void CalibrationEngine::load_from_preferences() {
     return;
   }
   
-  if (data.magic != CALIBRATION_PREFS_MAGIC) {
+  // Accept current magic or legacy Lot 2 magic
+  if (data.magic != CALIBRATION_PREFS_MAGIC && data.magic != CALIBRATION_PREFS_MAGIC_V2) {
     ESP_LOGD(CAL_TAG, "Invalid calibration preferences magic (0x%08X), ignoring", data.magic);
     return;
   }
+  
+  bool is_legacy_format = (data.magic == CALIBRATION_PREFS_MAGIC_V2);
   
   // Restore calibration type
   this->type_ = static_cast<CalibrationType>(data.calibration_type);
@@ -380,6 +383,13 @@ void CalibrationEngine::load_from_preferences() {
   // Restore DFRobot params
   this->dfrobot_mid_mv_ = data.dfrobot_mid_mv;
   this->dfrobot_offset_mv_ = data.dfrobot_offset_mv;
+  
+  // Restore calibration temperature (Lot 5)
+  if (!is_legacy_format) {
+    this->calibration_temperature_ = data.calibration_temperature;
+  } else {
+    this->calibration_temperature_ = NAN;  // Legacy format had no Tw
+  }
   
   // Restore points
   this->points_.clear();
@@ -397,8 +407,13 @@ void CalibrationEngine::load_from_preferences() {
   
   this->poly_coeffs_valid_ = false;
   
-  ESP_LOGI(CAL_TAG, "Loaded calibration from preferences: type=%s, %zu points",
-           this->get_type_name(), this->points_.size());
+  if (!std::isnan(this->calibration_temperature_)) {
+    ESP_LOGI(CAL_TAG, "Loaded calibration from preferences: type=%s, %zu points, Tw=%.1f°C",
+             this->get_type_name(), this->points_.size(), this->calibration_temperature_);
+  } else {
+    ESP_LOGI(CAL_TAG, "Loaded calibration from preferences: type=%s, %zu points",
+             this->get_type_name(), this->points_.size());
+  }
 }
 
 void CalibrationEngine::save_to_preferences() {
@@ -412,6 +427,7 @@ void CalibrationEngine::save_to_preferences() {
   data.calibration_type = static_cast<uint8_t>(this->type_);
   data.dfrobot_mid_mv = this->dfrobot_mid_mv_;
   data.dfrobot_offset_mv = this->dfrobot_offset_mv_;
+  data.calibration_temperature = this->calibration_temperature_;  // Lot 5
   
   data.point_count = std::min((size_t)MAX_CALIBRATION_POINTS, this->points_.size());
   for (uint8_t i = 0; i < data.point_count; i++) {
@@ -427,8 +443,13 @@ void CalibrationEngine::save_to_preferences() {
   
   this->prefs_.save(&data);
   
-  ESP_LOGI(CAL_TAG, "Saved calibration to preferences: type=%s, %d points",
-           this->get_type_name(), data.point_count);
+  if (!std::isnan(this->calibration_temperature_)) {
+    ESP_LOGI(CAL_TAG, "Saved calibration to preferences: type=%s, %d points, Tw=%.1f°C",
+             this->get_type_name(), data.point_count, this->calibration_temperature_);
+  } else {
+    ESP_LOGI(CAL_TAG, "Saved calibration to preferences: type=%s, %d points",
+             this->get_type_name(), data.point_count);
+  }
 }
 
 void CalibrationEngine::dump_config() const {
@@ -444,6 +465,11 @@ void CalibrationEngine::dump_config() const {
   if (this->type_ == CAL_TYPE_DFROBOT_ORP) {
     ESP_LOGCONFIG(CAL_TAG, "  DFRobot mid_mv: %.1f", this->dfrobot_mid_mv_);
     ESP_LOGCONFIG(CAL_TAG, "  DFRobot offset_mv: %.1f", this->dfrobot_offset_mv_);
+  }
+  
+  // Lot 5: Show calibration temperature if available
+  if (!std::isnan(this->calibration_temperature_)) {
+    ESP_LOGCONFIG(CAL_TAG, "  Calibration Tw: %.1f °C", this->calibration_temperature_);
   }
   
   for (size_t i = 0; i < this->points_.size(); i++) {

@@ -84,11 +84,14 @@
 
 ### F-TEMP : Compensation température eau
 
-| ID | Exigence | Lot |
-|----|----------|-----|
-| F-TEMP-01 | Binding capteur eau (`water_temperature_sensor_id`) | 5 |
-| F-TEMP-02 | Compensation pH selon Tw | 5 |
-| F-TEMP-03 | Métadonnées cal incluent Tw de référence | 5 |
+| ID | Exigence | Lot | Status |
+|----|----------|-----|--------|
+| F-TEMP-01 | Binding capteur eau (`water_temperature: sensor_id`) | 5 | ✅ Done |
+| F-TEMP-02 | Compensation pH selon Tw (modèle Nernstien documenté) | 5 | ✅ Done |
+| F-TEMP-03 | Métadonnées cal incluent Tw de référence | 5 | ✅ Done |
+| F-TEMP-04 | Switch runtime pour activer/désactiver compensation | 5 | ✅ Done |
+| F-TEMP-05 | Compensation ORP optionnelle (désactivée par défaut) | 5 | ✅ Done |
+| F-TEMP-06 | capteur Dallas avec adresse fixe (SENSOR-IDENTITY) | 5 | ✅ Done |
 
 ### F-ID : Identité capteurs (Anti-swap)
 
@@ -158,8 +161,8 @@
 | 1 | ADS1115 binding, raw values, cal mode switch | ✅ Done |
 | 2 | N-point calibration, Capturer, persistence | ✅ Done |
 | 3 | Filters (j5-like median, jump, clamp) | ✅ Done |
-| **4** | **Diagnostics (noise σ/ptp, stuck, flags)** | ✅ **Current** |
-| 5 | Water temp compensation (Tw) | Planned |
+| 4 | Diagnostics (noise σ/ptp, stuck, flags) | ✅ Done |
+| **5** | **Water temp compensation (Tw)** | ✅ **Current** |
 | 6 | Gates/campaigns | Planned |
 | 7 | HA polish, runtime algo select, services | Planned |
 | 8 | (Optionnel) Interference detection, EZO | Future |

@@ -80,9 +80,12 @@ struct CalibrationPrefsData {
   float dfrobot_mid_mv{2500.0f};
   float dfrobot_offset_mv{0.0f};
   uint8_t calibration_type{0};
+  // Lot 5: Water temperature at calibration time
+  float calibration_temperature{NAN};  // Tw in °C when calibration was saved
 };
 
-static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCAL10002;  // Lot 2 magic
+static constexpr uint32_t CALIBRATION_PREFS_MAGIC_V2 = 0xCAL10002;  // Lot 2 magic (legacy)
+static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCAL10005;     // Lot 5 magic (with Tw)
 
 /**
  * Calibration Engine - computes calibrated values from raw readings.
@@ -119,6 +122,11 @@ class CalibrationEngine {
   
   void set_dfrobot_offset_mv(float offset) { this->dfrobot_offset_mv_ = offset; }
   float get_dfrobot_offset_mv() const { return this->dfrobot_offset_mv_; }
+  
+  // Calibration temperature (Lot 5) - Tw at last save
+  void set_calibration_temperature(float temp) { this->calibration_temperature_ = temp; }
+  float get_calibration_temperature() const { return this->calibration_temperature_; }
+  bool has_calibration_temperature() const { return !std::isnan(this->calibration_temperature_); }
   
   // Point management
   void add_point(float x, float y);
@@ -165,6 +173,9 @@ class CalibrationEngine {
   // DFRobot ORP parameters
   float dfrobot_mid_mv_{2500.0f};
   float dfrobot_offset_mv_{0.0f};
+  
+  // Calibration temperature (Lot 5) - Tw at last save
+  float calibration_temperature_{NAN};
   
   // Calibration points (sorted by x for piecewise)
   std::vector<CalibrationPoint> points_;

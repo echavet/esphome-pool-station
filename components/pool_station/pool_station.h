@@ -8,6 +8,7 @@
 #include "calibration_engine.h"
 #include "channel_filter.h"
 #include "channel_diagnostics.h"
+#include "temperature_compensation.h"
 #include <vector>
 #include <map>
 #include <functional>
@@ -65,6 +66,9 @@ class CalibrationInvalidSensor;
 class DiagnosticNoisyFlag;
 class DiagnosticStuckFlag;
 class DiagnosticOutOfRangeFlag;
+
+// Temperature compensation forward declarations (Lot 5)
+class TempCompensationSwitch;
 
 /**
  * Main pool_station component.
@@ -225,6 +229,24 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   const DiagnosticsFlags &get_diagnostics_flags() const;
   bool is_diagnostics_enabled() const { return this->diagnostics_enabled_; }
 
+  // Temperature compensation configuration (Lot 5)
+  void set_temp_compensation_enabled(bool enabled);
+  void set_temp_comp_reference_temperature(float temp);
+  void set_temp_comp_neutral_ph(float ph);
+  void set_temp_comp_orp_coefficient(float coeff);
+  void set_temp_compensation_switch(TempCompensationSwitch *sw) { this->temp_comp_switch_ = sw; }
+  void set_calibration_temp_sensor(sensor::Sensor *sensor) { this->cal_temp_sensor_ = sensor; }
+  
+  // Temperature compensation accessors (Lot 5)
+  bool is_temp_compensation_enabled() const { return this->temp_compensator_.is_enabled(); }
+  const TemperatureCompensator &get_temp_compensator() const { return this->temp_compensator_; }
+  
+  // Set temperature compensation enabled at runtime (called by switch)
+  void set_temp_compensation_enabled_runtime(bool enabled);
+  
+  // Publish calibration temperature to diagnostic sensor (Lot 5)
+  void publish_calibration_temperature();
+
   // Calibration configuration
   void set_calibration_type(uint8_t type);
   void set_polynomial_order(uint8_t order);
@@ -285,6 +307,11 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   DiagnosticNoisyFlag *diag_noisy_flag_{nullptr};
   DiagnosticStuckFlag *diag_stuck_flag_{nullptr};
   DiagnosticOutOfRangeFlag *diag_out_of_range_flag_{nullptr};
+  
+  // Temperature compensation (Lot 5)
+  TemperatureCompensator temp_compensator_;
+  TempCompensationSwitch *temp_comp_switch_{nullptr};
+  sensor::Sensor *cal_temp_sensor_{nullptr};  // Shows Tw at last calibration
   
   // Callback ID for source sensor subscription
   optional<CallbackManager<void(float)>::CancelToken> source_callback_;
@@ -368,6 +395,30 @@ class DiagnosticOutOfRangeFlag : public binary_sensor::BinarySensor, public Comp
   void set_channel_type(uint8_t type) { this->channel_type_ = type; }
 
  protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
+/**
+ * Temperature Compensation Switch (Lot 5).
+ * 
+ * Runtime enable/disable for per-channel temperature compensation.
+ * When ON, calibrated values are temperature-corrected using water Tw.
+ * When OFF, raw calibrated values are used (no correction).
+ */
+class TempCompensationSwitch : public switch_::Switch, public Component {
+ public:
+  TempCompensationSwitch() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  void write_state(bool state) override;
+
   PoolStationComponent *parent_{nullptr};
   uint8_t channel_type_{0};
 };
