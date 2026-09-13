@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-13
+
+### Added — Lot 5: Water Temperature Reference + Compensation
+
+#### Temperature Compensation Module (`temperature_compensation.h/cpp`)
+- New `TemperatureCompensationConfig` struct for per-channel configuration
+- New `TemperatureCompensator` class wrapping compensation logic
+- Pure functions in `temp_comp_functions` namespace (unit-testable):
+  - `compute_slope_ratio()` — Nernst slope ratio calculation
+  - `compensate_ph()` — pH compensation using Nernstian model
+  - `compensate_orp()` — ORP compensation using linear model
+
+#### pH Temperature Compensation (Nernstian Model)
+- **Formula**: `pH_comp = neutral_ph + (pH_meas - neutral_ph) × slope_ratio`
+- **slope_ratio**: `(T_ref + 273.15) / (T_measured + 273.15)`
+- **reference_temperature**: Standard calibration temp (default 25°C)
+- **neutral_ph**: Isopotential point where T has no effect (default 7.0)
+- Documented equation in code, README, and example YAML
+
+#### ORP Temperature Compensation (Optional)
+- **Formula**: `ORP_comp = ORP_meas - orp_coefficient × (T_meas - T_ref)`
+- **orp_coefficient**: Linear coefficient in mV/°C (default 0 = disabled)
+- Disabled by default — ORP compensation varies by electrode
+
+#### Per-Channel Configuration
+- `temperature_compensation:` block under each channel
+- `enabled`: Static enable/disable
+- `reference_temperature`: Reference temp for compensation
+- `neutral_ph`: Isopotential point (pH only)
+- `orp_coefficient`: Linear coefficient (ORP only)
+- `enable_switch:` — Optional runtime switch entity for HA control
+
+#### Runtime Enable/Disable Switch
+- New `TempCompensationSwitch` class
+- Per-channel switch to toggle compensation from Home Assistant
+- Initial state synced with YAML `enabled` setting
+
+#### Calibration Temperature Metadata
+- Water temperature (Tw) captured at calibration save time
+- Persisted to flash with calibration data (new prefs magic 0xCAL10005)
+- Backward compatible with Lot 2 format (0xCAL10002)
+- `calibration_temp_sensor:` — Diagnostic sensor showing Tw at last cal
+- Logged at save time and on boot
+
+#### Water Temperature Binding
+- Top-level `water_temperature: sensor_id` made functional (was stub)
+- Reads from bound Dallas DS18B20 sensor
+- Required for temperature compensation to work
+
+### Changed
+- Pipeline order: raw → median → calibrate → **temp_comp** → clamp → jump → publish
+- `PoolStationChannelSensor` integrates `TemperatureCompensator`
+- `CalibrationEngine` stores/loads calibration temperature
+- `CalibrationSaveButton` captures Tw at save time
+- `dump_config()` outputs temperature compensation settings
+- Example YAML demonstrates full Lot 5 configuration with fixed Dallas address
+- README documents Nernstian formula and all configuration options
+
+### Technical Notes
+- Compensation applied after calibration, before guards
+- At neutral_ph (7.0), compensation has zero effect (isopotential)
+- Nernst constants derived from R=8.314 J/(mol·K), F=96485 C/mol
+- ORP compensation is simple linear model — no standard formula exists
+- Dallas sensors MUST use fixed ROM address per SENSOR-IDENTITY.md
+
+---
+
 ## [0.4.0] - 2026-09-13
 
 ### Added — Lot 4: Diagnostics (noise / drift / flags)
@@ -264,8 +331,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 1 | 0.1.0 | ✅ ADS1115 binding, raw values, calibration mode | Done |
 | 2 | 0.2.0 | ✅ N-point calibration, Capturer UI, persistence | Done |
 | 3 | 0.3.0 | ✅ Filters (j5-like median, jump, clamp) | Done |
-| **4** | **0.4.0** | ✅ **Diagnostics (noise σ/ptp, flags)** | **Current** |
-| 5 | 0.5.0 | Temperature compensation (Tw) | Planned |
+| 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
+| **5** | **0.5.0** | ✅ **Temperature compensation (Tw)** | **Current** |
 | 6 | 0.6.0 | Gates/campaigns | Planned |
 | 7 | 1.0.0 | HA polish, runtime algo select | Planned |
 

@@ -225,6 +225,14 @@ void PoolStationChannelSensor::setup() {
              this->calibration_.get_type_name(),
              this->calibration_.is_valid() ? "YES" : "NO",
              this->calibration_.get_point_count());
+    
+    // Publish calibration temperature if available (Lot 5)
+    if (this->calibration_.has_calibration_temperature()) {
+      ESP_LOGI(TAG, "Channel %s calibrated at Tw=%.1f°C",
+               this->get_channel_type_name(),
+               this->calibration_.get_calibration_temperature());
+      this->publish_calibration_temperature();
+    }
   }
   
   // Initialize diagnostics (Lot 4)
@@ -310,6 +318,17 @@ void PoolStationChannelSensor::dump_config() {
     }
     if (this->diag_out_of_range_flag_ != nullptr) {
       ESP_LOGCONFIG(TAG, "    out_of_range_flag: configured");
+    }
+  }
+  
+  // Dump temperature compensation config (Lot 5)
+  if (this->channel_type_ == CHANNEL_TYPE_PH || this->channel_type_ == CHANNEL_TYPE_ORP) {
+    this->temp_compensator_.dump_config();
+    if (this->temp_comp_switch_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    temp_comp_switch: configured");
+    }
+    if (this->cal_temp_sensor_ != nullptr) {
+      ESP_LOGCONFIG(TAG, "    calibration_temp_sensor: configured");
     }
   }
 }
@@ -411,6 +430,49 @@ void PoolStationChannelSensor::set_log_rate_limit_ms(uint32_t rate) {
   this->diagnostics_config_.log_rate_limit_ms = rate;
 }
 
+// ============================================================================
+// Temperature compensation configuration setters (Lot 5)
+// ============================================================================
+
+void PoolStationChannelSensor::set_temp_compensation_enabled(bool enabled) {
+  this->temp_compensator_.set_enabled(enabled);
+}
+
+void PoolStationChannelSensor::set_temp_comp_reference_temperature(float temp) {
+  this->temp_compensator_.set_reference_temperature(temp);
+}
+
+void PoolStationChannelSensor::set_temp_comp_neutral_ph(float ph) {
+  this->temp_compensator_.set_neutral_ph(ph);
+}
+
+void PoolStationChannelSensor::set_temp_comp_orp_coefficient(float coeff) {
+  this->temp_compensator_.set_orp_coefficient(coeff);
+}
+
+void PoolStationChannelSensor::set_temp_compensation_enabled_runtime(bool enabled) {
+  this->temp_compensator_.set_enabled(enabled);
+  if (enabled) {
+    ESP_LOGI(TAG, "Channel %s: Temperature compensation ENABLED", this->get_channel_type_name());
+  } else {
+    ESP_LOGI(TAG, "Channel %s: Temperature compensation DISABLED", this->get_channel_type_name());
+  }
+}
+
+void PoolStationChannelSensor::publish_calibration_temperature() {
+  if (this->cal_temp_sensor_ == nullptr) {
+    return;
+  }
+  
+  float cal_temp = this->calibration_.get_calibration_temperature();
+  this->cal_temp_sensor_->publish_state(cal_temp);
+  
+  if (!std::isnan(cal_temp)) {
+    ESP_LOGD(TAG, "Channel %s: Published calibration temperature %.1f°C", 
+             this->get_channel_type_name(), cal_temp);
+  }
+}
+
 const DiagnosticsStats &PoolStationChannelSensor::get_diagnostics_stats() const {
   return this->diagnostics_.get_stats();
 }
@@ -439,8 +501,9 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   this->last_update_ = now;
   
   // =========================================================================
-  // PIPELINE: raw → median → raw_sensor → calibrate → calibrated_sensor 
-  //           → clamp → jump guard → publish
+  // PIPELINE: raw → median → raw_sensor → calibrate → temp_comp 
+  //           → calibrated_sensor → clamp → jump guard → publish
+  // (Lot 5: Temperature compensation inserted after calibration)
   // =========================================================================
   
   // Step 1: Store original raw value
@@ -494,13 +557,46 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   }
   this->last_calibrated_value_ = calibrated;
   
-  // Step 5: Publish calibrated value to diagnostic sensor (pre-guard)
-  if (this->calibrated_sensor_ != nullptr) {
-    this->calibrated_sensor_->publish_state(calibrated);
+  // Step 5 (Lot 5): Apply temperature compensation
+  // Get water temperature from parent component
+  float t_water = NAN;
+  if (this->parent_ != nullptr && this->parent_->has_water_temperature()) {
+    t_water = this->parent_->get_water_temperature();
   }
   
-  // Step 6: Apply value clamp (min/max guards)
-  float guarded = calibrated;
+  float compensated = calibrated;
+  if (this->temp_compensator_.is_enabled() && !std::isnan(t_water)) {
+    switch (this->channel_type_) {
+      case CHANNEL_TYPE_PH:
+        compensated = this->temp_compensator_.compensate_ph(calibrated, t_water);
+        ESP_LOGV(TAG, "Channel %s: Tw=%.1f°C, pH %.3f → %.3f (compensated)",
+                 this->get_channel_type_name(), t_water, calibrated, compensated);
+        break;
+        
+      case CHANNEL_TYPE_ORP:
+        compensated = this->temp_compensator_.compensate_orp(calibrated, t_water);
+        if (std::abs(this->temp_compensator_.get_orp_coefficient()) > 0.001f) {
+          ESP_LOGV(TAG, "Channel %s: Tw=%.1f°C, ORP %.1f → %.1f mV (compensated)",
+                   this->get_channel_type_name(), t_water, calibrated, compensated);
+        }
+        break;
+        
+      case CHANNEL_TYPE_PRESSURE:
+        // No temperature compensation for pressure by default
+        break;
+        
+      default:
+        break;
+    }
+  }
+  
+  // Step 6: Publish compensated value to diagnostic sensor (pre-guard)
+  if (this->calibrated_sensor_ != nullptr) {
+    this->calibrated_sensor_->publish_state(compensated);
+  }
+  
+  // Step 7: Apply value clamp (min/max guards)
+  float guarded = compensated;
   if (this->filter_config_.is_clamp_enabled()) {
     guarded = filter_functions::clamp_value(
         guarded, 
@@ -508,7 +604,7 @@ void PoolStationChannelSensor::on_source_value_(float value) {
         this->filter_config_.value_max);
   }
   
-  // Step 7: Apply jump guard (reject absurd jumps, accept new plateau after streak)
+  // Step 8: Apply jump guard (reject absurd jumps, accept new plateau after streak)
   // In calibration mode, bypass jump guard for immediate response
   if (this->filter_config_.is_jump_guard_enabled()) {
     bool bypass_jump = this->parent_ != nullptr && this->parent_->is_calibration_mode();
@@ -518,7 +614,7 @@ void PoolStationChannelSensor::on_source_value_(float value) {
       if (rejected) {
         ESP_LOGD(TAG, "Channel %s: jump rejected (%.3f → %.3f, keeping %.3f)",
                  this->get_channel_type_name(), 
-                 this->last_guarded_value_, calibrated, guarded);
+                 this->last_guarded_value_, compensated, guarded);
       }
     } else {
       // Reset jump guard baseline in calibration mode
@@ -529,7 +625,7 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   }
   this->last_guarded_value_ = guarded;
   
-  // Step 8: Publish final guarded value
+  // Step 9: Publish final guarded value
   this->publish_state(guarded);
   
   // =========================================================================
@@ -585,8 +681,8 @@ void PoolStationChannelSensor::on_source_value_(float value) {
     }
   }
   
-  ESP_LOGV(TAG, "Channel %s: raw=%.4f, filtered=%.4f, cal=%.3f, guarded=%.3f (type=%s)",
-           this->get_channel_type_name(), value, filtered_raw, calibrated, guarded,
+  ESP_LOGV(TAG, "Channel %s: raw=%.4f, filtered=%.4f, cal=%.3f, comp=%.3f, guarded=%.3f (type=%s)",
+           this->get_channel_type_name(), value, filtered_raw, calibrated, compensated, guarded,
            this->calibration_.get_type_name());
 }
 
@@ -669,6 +765,43 @@ void DiagnosticOutOfRangeFlag::setup() {
 void DiagnosticOutOfRangeFlag::dump_config() {
   LOG_BINARY_SENSOR("", "Diagnostic Out Of Range Flag", this);
   ESP_LOGCONFIG(TAG, "  Channel type: %d", this->channel_type_);
+}
+
+// ============================================================================
+// Temperature Compensation Switch (Lot 5)
+// ============================================================================
+
+void TempCompensationSwitch::setup() {
+  ESP_LOGD(TAG, "Setting up Temperature Compensation Switch for channel type %d", this->channel_type_);
+  
+  // Get initial state from channel configuration
+  bool initial_state = false;
+  if (this->parent_ != nullptr) {
+    PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+    if (channel != nullptr) {
+      initial_state = channel->is_temp_compensation_enabled();
+    }
+  }
+  this->publish_state(initial_state);
+}
+
+void TempCompensationSwitch::dump_config() {
+  LOG_SWITCH("", "Temperature Compensation Switch", this);
+  ESP_LOGCONFIG(TAG, "  Channel type: %d", this->channel_type_);
+}
+
+void TempCompensationSwitch::write_state(bool state) {
+  this->publish_state(state);
+  
+  if (this->parent_ != nullptr) {
+    PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+    if (channel != nullptr) {
+      channel->set_temp_compensation_enabled_runtime(state);
+    }
+  }
+  
+  ESP_LOGI(TAG, "Temperature compensation for channel type %d switched %s", 
+           this->channel_type_, state ? "ON" : "OFF");
 }
 
 }  // namespace pool_station

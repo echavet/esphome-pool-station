@@ -84,6 +84,16 @@ DiagnosticOutOfRangeFlag = pool_station_ns.class_(
     "DiagnosticOutOfRangeFlag", binary_sensor.BinarySensor, cg.Component
 )
 
+# Temperature compensation switch (Lot 5)
+TempCompensationSwitch = pool_station_ns.class_(
+    "TempCompensationSwitch", switch.Switch, cg.Component
+)
+
+# Calibration temperature text sensor (Lot 5)
+CalibrationTempSensor = pool_station_ns.class_(
+    "CalibrationTempSensor", cg.Component
+)
+
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
 CONF_CALIBRATION_MODE = "calibration_mode"
@@ -122,6 +132,15 @@ CONF_PTP_SENSOR = "ptp_sensor"
 CONF_NOISY_FLAG = "noisy"
 CONF_STUCK_FLAG = "stuck"
 CONF_OUT_OF_RANGE_FLAG = "out_of_range"
+
+# Temperature compensation configuration keys (Lot 5)
+CONF_TEMPERATURE_COMPENSATION = "temperature_compensation"
+CONF_TEMP_COMP_ENABLED = "enabled"
+CONF_TEMP_COMP_REFERENCE_TEMP = "reference_temperature"
+CONF_TEMP_COMP_NEUTRAL_PH = "neutral_ph"
+CONF_TEMP_COMP_ORP_COEFFICIENT = "orp_coefficient"
+CONF_TEMP_COMP_SWITCH = "enable_switch"
+CONF_CALIBRATION_TEMP_SENSOR = "calibration_temp_sensor"
 
 # Calibration configuration keys
 CONF_CALIBRATION = "calibration"
@@ -344,6 +363,65 @@ def capturer_schema(channel_type):
     })
 
 
+def temperature_compensation_schema(channel_type):
+    """Schema for temperature compensation configuration (Lot 5).
+    
+    Provides temperature-compensated pH and ORP readings using documented models.
+    
+    ## pH Compensation (Nernstian Model)
+    
+    The Nernst equation's slope is temperature-dependent:
+    
+        slope(T) ≈ 59.16 × (T + 273.15) / 298.15  [mV/pH]
+    
+    Formula used:
+    
+        pH_compensated = neutral_ph + (pH_measured - neutral_ph) × slope_ratio
+        slope_ratio = (T_ref + 273.15) / (T_measured + 273.15)
+    
+    At pH = neutral_ph (default 7.0), temperature has no effect (isopotential point).
+    
+    ## ORP Compensation (Linear Model, optional)
+    
+    ORP compensation is less standardized. A simple linear model is provided:
+    
+        ORP_compensated = ORP_measured - orp_coefficient × (T_measured - T_ref)
+    
+    Default orp_coefficient is 0 (disabled).
+    
+    Pipeline order: raw → median → calibrate → temp_comp → clamp → jump → publish
+    """
+    # Default values
+    default_ref_temp = 25.0  # Standard calibration temperature
+    default_neutral = 7.0   # Isopotential point
+    default_orp_coeff = 0.0 # Disabled by default
+    
+    return cv.Schema({
+        # Runtime enable/disable (switch entity preferred)
+        cv.Optional(CONF_TEMP_COMP_ENABLED, default=False): cv.boolean,
+        
+        # Reference temperature for compensation (calibration standard)
+        cv.Optional(CONF_TEMP_COMP_REFERENCE_TEMP, default=default_ref_temp): cv.float_range(
+            min=-10.0, max=60.0
+        ),
+        
+        # Isopotential point for pH (where temperature has no effect)
+        cv.Optional(CONF_TEMP_COMP_NEUTRAL_PH, default=default_neutral): cv.float_range(
+            min=0.0, max=14.0
+        ),
+        
+        # ORP temperature coefficient (mV/°C, 0 = disabled)
+        cv.Optional(CONF_TEMP_COMP_ORP_COEFFICIENT, default=default_orp_coeff): cv.float_,
+        
+        # Optional runtime enable/disable switch entity
+        cv.Optional(CONF_TEMP_COMP_SWITCH): switch.switch_schema(
+            TempCompensationSwitch,
+            icon="mdi:thermometer-water",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+    })
+
+
 def channel_schema(channel_type):
     """Generate schema for a channel (pressure, ph, orp)."""
     defaults = CHANNEL_DEFAULTS.get(channel_type, {})
@@ -378,6 +456,8 @@ def channel_schema(channel_type):
         cv.Optional(CONF_FILTERS): filters_schema(),
         # Diagnostics configuration (Lot 4)
         cv.Optional(CONF_DIAGNOSTICS): diagnostics_schema(channel_type),
+        # Temperature compensation (Lot 5) - primarily for pH and ORP
+        cv.Optional(CONF_TEMPERATURE_COMPENSATION): temperature_compensation_schema(channel_type),
         # Capturer UI for calibration
         cv.Optional(CONF_CAPTURER): capturer_schema(channel_type),
         # Calibration invalid binary sensor
@@ -386,6 +466,14 @@ def channel_schema(channel_type):
             icon="mdi:alert-circle",
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        # Calibration temperature diagnostic (Lot 5) - shows Tw at last calibration
+        cv.Optional(CONF_CALIBRATION_TEMP_SENSOR): sensor.sensor_schema(
+            unit_of_measurement="°C",
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:thermometer-check",
         ),
     })
 
@@ -624,6 +712,29 @@ async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, ch
         cg.add(channel_var.set_diag_out_of_range_flag(oor_var))
 
 
+async def setup_temperature_compensation(config, parent_var, channel_var, channel_type, channel_key):
+    """Setup temperature compensation for a channel (Lot 5)."""
+    temp_comp_conf = config.get(CONF_TEMPERATURE_COMPENSATION)
+    if temp_comp_conf is None:
+        return
+    
+    # Enable temperature compensation on channel
+    cg.add(channel_var.set_temp_compensation_enabled(temp_comp_conf[CONF_TEMP_COMP_ENABLED]))
+    cg.add(channel_var.set_temp_comp_reference_temperature(temp_comp_conf[CONF_TEMP_COMP_REFERENCE_TEMP]))
+    cg.add(channel_var.set_temp_comp_neutral_ph(temp_comp_conf[CONF_TEMP_COMP_NEUTRAL_PH]))
+    cg.add(channel_var.set_temp_comp_orp_coefficient(temp_comp_conf[CONF_TEMP_COMP_ORP_COEFFICIENT]))
+    
+    # Optional runtime enable/disable switch
+    if CONF_TEMP_COMP_SWITCH in temp_comp_conf:
+        sw_conf = temp_comp_conf[CONF_TEMP_COMP_SWITCH]
+        sw_var = cg.new_Pvariable(sw_conf[CONF_ID])
+        await cg.register_component(sw_var, sw_conf)
+        await switch.register_switch(sw_var, sw_conf)
+        cg.add(sw_var.set_parent(parent_var))
+        cg.add(sw_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_temp_compensation_switch(sw_var))
+
+
 async def to_code(config):
     """Generate C++ code for pool_station component."""
     var = cg.new_Pvariable(config[CONF_ID])
@@ -737,6 +848,15 @@ async def to_code(config):
             
             # Setup Diagnostics (Lot 4)
             await setup_diagnostics_ui(ch_conf, var, ch_var, channel_type, channel_key)
+            
+            # Setup Temperature Compensation (Lot 5)
+            await setup_temperature_compensation(ch_conf, var, ch_var, channel_type, channel_key)
+            
+            # Setup Calibration Temperature Sensor (Lot 5)
+            if CONF_CALIBRATION_TEMP_SENSOR in ch_conf:
+                cal_temp_conf = ch_conf[CONF_CALIBRATION_TEMP_SENSOR]
+                cal_temp_var = await sensor.new_sensor(cal_temp_conf)
+                cg.add(ch_var.set_calibration_temp_sensor(cal_temp_var))
             
             # Register channel with parent
             cg.add(var.register_channel(ch_var, channel_type))
