@@ -94,6 +94,50 @@ CalibrationTempSensor = pool_station_ns.class_(
     "CalibrationTempSensor", cg.Component
 )
 
+# Gate classes (Lot 6)
+MeasurementGate = pool_station_ns.class_("MeasurementGate")
+GateBlockedBinarySensor = pool_station_ns.class_(
+    "GateBlockedBinarySensor", binary_sensor.BinarySensor, cg.Component
+)
+
+# Campaign classes (Lot 6)
+MeasurementCampaign = pool_station_ns.class_(
+    "MeasurementCampaign", cg.Component
+)
+CampaignStartButton = pool_station_ns.class_(
+    "CampaignStartButton", button.Button, cg.Component
+)
+CampaignAbortButton = pool_station_ns.class_(
+    "CampaignAbortButton", button.Button, cg.Component
+)
+CampaignRunningSensor = pool_station_ns.class_(
+    "CampaignRunningSensor", binary_sensor.BinarySensor, cg.Component
+)
+CampaignResultSensor = pool_station_ns.class_(
+    "CampaignResultSensor", sensor.Sensor, cg.Component
+)
+
+# Gate condition type enum
+GateConditionType = pool_station_ns.enum("GateConditionType")
+GATE_COND_BINARY_SENSOR = GateConditionType.GATE_COND_BINARY_SENSOR
+GATE_COND_SWITCH = GateConditionType.GATE_COND_SWITCH
+GATE_COND_SENSOR_THRESHOLD = GateConditionType.GATE_COND_SENSOR_THRESHOLD
+
+# Threshold operator enum
+ThresholdOperator = pool_station_ns.enum("ThresholdOperator")
+THRESHOLD_OPERATORS = {
+    ">": 0,
+    ">=": 1,
+    "<": 2,
+    "<=": 3,
+    "==": 4,
+}
+
+# Campaign action type enum
+CampaignActionType = pool_station_ns.enum("CampaignActionType")
+ACTION_SWITCH_ON = CampaignActionType.ACTION_SWITCH_ON
+ACTION_SWITCH_OFF = CampaignActionType.ACTION_SWITCH_OFF
+
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
 CONF_CALIBRATION_MODE = "calibration_mode"
@@ -141,6 +185,38 @@ CONF_TEMP_COMP_NEUTRAL_PH = "neutral_ph"
 CONF_TEMP_COMP_ORP_COEFFICIENT = "orp_coefficient"
 CONF_TEMP_COMP_SWITCH = "enable_switch"
 CONF_CALIBRATION_TEMP_SENSOR = "calibration_temp_sensor"
+
+# Gate configuration keys (Lot 6)
+CONF_GATE = "gate"
+CONF_SAMPLE_WHEN = "sample_when"
+CONF_GATE_CONDITIONS = "conditions"
+CONF_GATE_BINARY_SENSOR = "binary_sensor_id"
+CONF_GATE_SWITCH = "switch_id"
+CONF_GATE_SENSOR = "sensor_id"
+CONF_GATE_DESIRED_STATE = "state"
+CONF_GATE_THRESHOLD = "threshold"
+CONF_GATE_THRESHOLD_OP = "operator"
+CONF_GATE_THRESHOLD_TOLERANCE = "tolerance"
+CONF_GATE_INVERT = "invert"
+CONF_GATE_BLOCKED = "gate_blocked"
+
+# Campaign configuration keys (Lot 6)
+CONF_CAMPAIGNS = "campaigns"
+CONF_CAMPAIGN_PREPARE = "prepare"
+CONF_CAMPAIGN_DELAY = "delay"
+CONF_CAMPAIGN_SAMPLE_CHANNELS = "sample_channels"
+CONF_CAMPAIGN_BURST_SAMPLES = "burst_samples"
+CONF_CAMPAIGN_BURST_DELAY = "burst_delay"
+CONF_CAMPAIGN_RESTORE = "restore"
+CONF_CAMPAIGN_TIMEOUT = "timeout"
+CONF_CAMPAIGN_SAFETY_GATE = "safety_gate"
+CONF_CAMPAIGN_CONDITIONS_TAG = "conditions_tag"
+CONF_CAMPAIGN_START_BUTTON = "start_button"
+CONF_CAMPAIGN_ABORT_BUTTON = "abort_button"
+CONF_CAMPAIGN_RUNNING = "running"
+CONF_CAMPAIGN_RESULT_SENSORS = "result_sensors"
+CONF_CAMPAIGN_ACTION_SWITCH = "switch_id"
+CONF_CAMPAIGN_ACTION_STATE = "state"
 
 # Calibration configuration keys
 CONF_CALIBRATION = "calibration"
@@ -422,6 +498,172 @@ def temperature_compensation_schema(channel_type):
     })
 
 
+def validate_threshold_operator(value):
+    """Validate threshold operator string."""
+    value = cv.string_strict(value)
+    if value not in THRESHOLD_OPERATORS:
+        raise cv.Invalid(
+            f"Unknown threshold operator '{value}'. Valid operators: {list(THRESHOLD_OPERATORS.keys())}"
+        )
+    return value
+
+
+def gate_condition_schema():
+    """Schema for a single gate condition (Lot 6).
+    
+    Conditions can be:
+    - binary_sensor with desired state (ON/OFF)
+    - switch with desired state (ON/OFF)
+    - sensor threshold comparison (>, >=, <, <=, ==)
+    
+    Examples:
+      - binary_sensor_id: flow_switch, state: true  (sample when flow detected)
+      - switch_id: filtration, state: false         (sample when filtration OFF)
+      - sensor_id: pressure, operator: ">=", threshold: 0.5  (sample when pressure >= 0.5)
+    """
+    return cv.Schema({
+        cv.Optional(CONF_NAME): cv.string,
+        # Binary sensor condition
+        cv.Optional(CONF_GATE_BINARY_SENSOR): cv.use_id(binary_sensor.BinarySensor),
+        # Switch condition
+        cv.Optional(CONF_GATE_SWITCH): cv.use_id(switch.Switch),
+        # Sensor threshold condition
+        cv.Optional(CONF_GATE_SENSOR): cv.use_id(sensor.Sensor),
+        cv.Optional(CONF_GATE_THRESHOLD_OP, default=">="): validate_threshold_operator,
+        cv.Optional(CONF_GATE_THRESHOLD, default=0.0): cv.float_,
+        cv.Optional(CONF_GATE_THRESHOLD_TOLERANCE, default=0.001): cv.float_,
+        # Desired state for binary_sensor/switch conditions
+        cv.Optional(CONF_GATE_DESIRED_STATE, default=True): cv.boolean,
+    })
+
+
+def gate_schema():
+    """Schema for per-channel gate configuration (Lot 6).
+    
+    Gates block sampling/publishing unless all conditions are met.
+    Multiple conditions use AND logic.
+    
+    Example:
+      gate:
+        conditions:
+          - binary_sensor_id: flow_switch
+            state: true
+          - sensor_id: pressure
+            operator: ">="
+            threshold: 0.5
+        invert: false
+        gate_blocked:
+          name: "pH Gate Blocked"
+    """
+    return cv.Schema({
+        cv.Optional(CONF_GATE_CONDITIONS, default=[]): cv.ensure_list(gate_condition_schema()),
+        cv.Optional(CONF_GATE_INVERT, default=False): cv.boolean,
+        cv.Optional(CONF_GATE_BLOCKED): binary_sensor.binary_sensor_schema(
+            GateBlockedBinarySensor,
+            icon="mdi:gate-alert",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+    })
+
+
+def campaign_prepare_action_schema():
+    """Schema for a campaign prepare action (Lot 6).
+    
+    Actions are switch state changes (ON/OFF).
+    """
+    return cv.Schema({
+        cv.Required(CONF_CAMPAIGN_ACTION_SWITCH): cv.use_id(switch.Switch),
+        cv.Required(CONF_CAMPAIGN_ACTION_STATE): cv.boolean,
+    })
+
+
+def campaign_result_sensor_schema(channel_type):
+    """Schema for campaign result sensor."""
+    defaults = CHANNEL_DEFAULTS.get(channel_type, {})
+    return cv.Schema({
+        cv.GenerateID(): cv.declare_id(CampaignResultSensor),
+        cv.Optional(CONF_NAME): cv.string,
+        cv.Optional(CONF_UNIT_OF_MEASUREMENT, default=defaults.get("unit", "")): cv.string,
+        cv.Optional(CONF_ACCURACY_DECIMALS, default=defaults.get("accuracy", 2)): cv.int_range(0, 5),
+        cv.Optional(CONF_ICON, default=defaults.get("icon", "mdi:gauge")): cv.icon,
+        cv.Optional("tag"): cv.string,  # Filter by conditions tag
+    })
+
+
+def campaign_schema():
+    """Schema for a measurement campaign (Lot 6).
+    
+    Eric's canonical scenario:
+      - prepare: turn relay_filtration OFF
+      - delay: 60s (wait for water to settle)
+      - sample: pH, ORP channels
+      - restore: turn relay_filtration back to prior state
+    
+    State machine: idle → preparing → waiting → sampling → restoring → idle
+    
+    Example:
+      campaigns:
+        - name: "pH/ORP Quiescent"
+          prepare:
+            - switch_id: relay_filtration
+              state: false
+          delay: 60s
+          sample_channels: [ph, orp]
+          burst_samples: 3
+          burst_delay: 500ms
+          restore: true
+          timeout: 120s
+          start_button:
+            name: "Start Quiescent Measurement"
+          running:
+            name: "Quiescent Measurement Running"
+    """
+    return cv.Schema({
+        cv.GenerateID(): cv.declare_id(MeasurementCampaign),
+        cv.Required(CONF_NAME): cv.string,
+        # Prepare actions (switch state changes)
+        cv.Optional(CONF_CAMPAIGN_PREPARE, default=[]): cv.ensure_list(campaign_prepare_action_schema()),
+        # Delay before sampling
+        cv.Optional(CONF_CAMPAIGN_DELAY, default="0s"): cv.positive_time_period_milliseconds,
+        # Channels to sample (by name: pressure, ph, orp)
+        cv.Required(CONF_CAMPAIGN_SAMPLE_CHANNELS): cv.ensure_list(cv.one_of("pressure", "ph", "orp", lower=True)),
+        # Burst sampling
+        cv.Optional(CONF_CAMPAIGN_BURST_SAMPLES, default=1): cv.int_range(min=1, max=10),
+        cv.Optional(CONF_CAMPAIGN_BURST_DELAY, default="100ms"): cv.positive_time_period_milliseconds,
+        # Restore actuators to prior state
+        cv.Optional(CONF_CAMPAIGN_RESTORE, default=True): cv.boolean,
+        # Timeout safety
+        cv.Optional(CONF_CAMPAIGN_TIMEOUT, default="120s"): cv.positive_time_period_milliseconds,
+        # Optional safety gate reference (by name from channel gates)
+        cv.Optional(CONF_CAMPAIGN_SAFETY_GATE): cv.string,
+        # Conditions tag for A/B results
+        cv.Optional(CONF_CAMPAIGN_CONDITIONS_TAG): cv.string,
+        # UI entities
+        cv.Optional(CONF_CAMPAIGN_START_BUTTON): button.button_schema(
+            CampaignStartButton,
+            icon="mdi:play-circle",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_CAMPAIGN_ABORT_BUTTON): button.button_schema(
+            CampaignAbortButton,
+            icon="mdi:stop-circle",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_CAMPAIGN_RUNNING): binary_sensor.binary_sensor_schema(
+            CampaignRunningSensor,
+            icon="mdi:run",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        # Optional result sensors per channel
+        cv.Optional(CONF_CAMPAIGN_RESULT_SENSORS): cv.Schema({
+            cv.Optional(CONF_PRESSURE): campaign_result_sensor_schema("pressure"),
+            cv.Optional(CONF_PH): campaign_result_sensor_schema("ph"),
+            cv.Optional(CONF_ORP): campaign_result_sensor_schema("orp"),
+        }),
+    })
+
+
 def channel_schema(channel_type):
     """Generate schema for a channel (pressure, ph, orp)."""
     defaults = CHANNEL_DEFAULTS.get(channel_type, {})
@@ -475,6 +717,10 @@ def channel_schema(channel_type):
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             icon="mdi:thermometer-check",
         ),
+        # Gate configuration (Lot 6) - block sampling unless conditions met
+        cv.Optional(CONF_GATE): gate_schema(),
+        # Simple sample_when shorthand (alternative to full gate config)
+        cv.Optional(CONF_SAMPLE_WHEN): cv.ensure_list(gate_condition_schema()),
     })
 
 
@@ -508,6 +754,9 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_WATER_TEMPERATURE): cv.Schema({
         cv.Optional(CONF_WATER_TEMPERATURE_SENSOR_ID): cv.use_id(sensor.Sensor),
     }),
+    
+    # Campaigns (Lot 6) - one-shot measurement sequences
+    cv.Optional(CONF_CAMPAIGNS): cv.ensure_list(campaign_schema()),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -735,6 +984,196 @@ async def setup_temperature_compensation(config, parent_var, channel_var, channe
         cg.add(channel_var.set_temp_compensation_switch(sw_var))
 
 
+async def setup_channel_gate(config, parent_var, channel_var, channel_type, channel_key):
+    """Setup gate for a channel (Lot 6)."""
+    # Check for both gate: block and sample_when: shorthand
+    gate_conf = config.get(CONF_GATE)
+    sample_when_conf = config.get(CONF_SAMPLE_WHEN)
+    
+    if gate_conf is None and sample_when_conf is None:
+        return
+    
+    # Create gate object
+    gate_var = cg.new_Pvariable(cv.declare_id(MeasurementGate)(f"{channel_key}_gate"))
+    cg.add(gate_var.set_name(f"{channel_key}_gate"))
+    
+    # Merge conditions from both sources
+    conditions = []
+    if gate_conf is not None:
+        conditions.extend(gate_conf.get(CONF_GATE_CONDITIONS, []))
+        # Set invert flag
+        cg.add(gate_var.set_enabled(True))
+        if gate_conf.get(CONF_GATE_INVERT, False):
+            # Invert is set via config, need to add method to gate
+            pass  # TODO: Add invert support in C++
+    
+    if sample_when_conf is not None:
+        conditions.extend(sample_when_conf)
+    
+    # Add conditions to gate
+    for cond_conf in conditions:
+        cond_name = cond_conf.get(CONF_NAME, "")
+        
+        if CONF_GATE_BINARY_SENSOR in cond_conf:
+            # Binary sensor condition
+            bs_ref = await cg.get_variable(cond_conf[CONF_GATE_BINARY_SENSOR])
+            desired_state = cond_conf.get(CONF_GATE_DESIRED_STATE, True)
+            
+            # Create condition struct and add to gate
+            cg.add(gate_var.add_condition(cg.StructInitializer(
+                pool_station_ns.struct("GateCondition"),
+                ("type", pool_station_ns.GATE_COND_BINARY_SENSOR),
+                ("binary_sensor_ref", bs_ref),
+                ("desired_state", desired_state),
+                ("name", cond_name),
+            )))
+        
+        elif CONF_GATE_SWITCH in cond_conf:
+            # Switch condition
+            sw_ref = await cg.get_variable(cond_conf[CONF_GATE_SWITCH])
+            desired_state = cond_conf.get(CONF_GATE_DESIRED_STATE, True)
+            
+            cg.add(gate_var.add_condition(cg.StructInitializer(
+                pool_station_ns.struct("GateCondition"),
+                ("type", pool_station_ns.GATE_COND_SWITCH),
+                ("switch_ref", sw_ref),
+                ("desired_state", desired_state),
+                ("name", cond_name),
+            )))
+        
+        elif CONF_GATE_SENSOR in cond_conf:
+            # Sensor threshold condition
+            sens_ref = await cg.get_variable(cond_conf[CONF_GATE_SENSOR])
+            op_str = cond_conf.get(CONF_GATE_THRESHOLD_OP, ">=")
+            op_val = THRESHOLD_OPERATORS.get(op_str, 1)  # Default to >=
+            threshold = cond_conf.get(CONF_GATE_THRESHOLD, 0.0)
+            tolerance = cond_conf.get(CONF_GATE_THRESHOLD_TOLERANCE, 0.001)
+            
+            cg.add(gate_var.add_condition(cg.StructInitializer(
+                pool_station_ns.struct("GateCondition"),
+                ("type", pool_station_ns.GATE_COND_SENSOR_THRESHOLD),
+                ("sensor_ref", sens_ref),
+                ("threshold_op", op_val),
+                ("threshold_value", threshold),
+                ("threshold_tolerance", tolerance),
+                ("name", cond_name),
+            )))
+    
+    # Set gate on channel
+    cg.add(channel_var.set_gate(gate_var))
+    
+    # Optional gate_blocked binary sensor
+    if gate_conf is not None and CONF_GATE_BLOCKED in gate_conf:
+        blocked_conf = gate_conf[CONF_GATE_BLOCKED]
+        blocked_var = cg.new_Pvariable(blocked_conf[CONF_ID])
+        await cg.register_component(blocked_var, blocked_conf)
+        await binary_sensor.register_binary_sensor(blocked_var, blocked_conf)
+        cg.add(blocked_var.set_gate(gate_var))
+        cg.add(channel_var.set_gate_blocked_sensor(blocked_var))
+
+
+async def setup_campaigns(config, parent_var):
+    """Setup measurement campaigns (Lot 6)."""
+    campaigns_conf = config.get(CONF_CAMPAIGNS)
+    if campaigns_conf is None:
+        return
+    
+    channel_type_map = {
+        "pressure": CHANNEL_TYPE_PRESSURE,
+        "ph": CHANNEL_TYPE_PH,
+        "orp": CHANNEL_TYPE_ORP,
+    }
+    
+    for camp_conf in campaigns_conf:
+        camp_name = camp_conf[CONF_NAME]
+        camp_var = cg.new_Pvariable(camp_conf[CONF_ID])
+        await cg.register_component(camp_var, camp_conf)
+        
+        cg.add(camp_var.set_name(camp_name))
+        cg.add(camp_var.set_parent(parent_var))
+        
+        # Configure prepare actions
+        for action_conf in camp_conf.get(CONF_CAMPAIGN_PREPARE, []):
+            sw_ref = await cg.get_variable(action_conf[CONF_CAMPAIGN_ACTION_SWITCH])
+            target_state = action_conf[CONF_CAMPAIGN_ACTION_STATE]
+            
+            action_type = pool_station_ns.ACTION_SWITCH_ON if target_state else pool_station_ns.ACTION_SWITCH_OFF
+            
+            cg.add(camp_var.add_prepare_action(cg.StructInitializer(
+                pool_station_ns.struct("CampaignAction"),
+                ("type", action_type),
+                ("switch_ref", sw_ref),
+                ("switch_id", str(action_conf[CONF_CAMPAIGN_ACTION_SWITCH])),
+            )))
+        
+        # Configure delay
+        delay_ms = camp_conf.get(CONF_CAMPAIGN_DELAY, 0)
+        cg.add(camp_var.set_delay_ms(delay_ms))
+        
+        # Configure sample channels
+        for ch_name in camp_conf.get(CONF_CAMPAIGN_SAMPLE_CHANNELS, []):
+            ch_type = channel_type_map.get(ch_name, CHANNEL_TYPE_PRESSURE)
+            cg.add(camp_var.add_sample_channel(ch_type))
+        
+        # Configure burst sampling
+        cg.add(camp_var.set_burst_samples(camp_conf.get(CONF_CAMPAIGN_BURST_SAMPLES, 1)))
+        cg.add(camp_var.set_burst_delay_ms(camp_conf.get(CONF_CAMPAIGN_BURST_DELAY, 100)))
+        
+        # Configure restore and timeout
+        cg.add(camp_var.set_restore(camp_conf.get(CONF_CAMPAIGN_RESTORE, True)))
+        cg.add(camp_var.set_timeout_ms(camp_conf.get(CONF_CAMPAIGN_TIMEOUT, 120000)))
+        
+        # Configure conditions tag
+        if CONF_CAMPAIGN_CONDITIONS_TAG in camp_conf:
+            cg.add(camp_var.set_conditions_tag(camp_conf[CONF_CAMPAIGN_CONDITIONS_TAG]))
+        
+        # Setup start button
+        if CONF_CAMPAIGN_START_BUTTON in camp_conf:
+            btn_conf = camp_conf[CONF_CAMPAIGN_START_BUTTON]
+            btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
+            await cg.register_component(btn_var, btn_conf)
+            await button.register_button(btn_var, btn_conf)
+            cg.add(btn_var.set_campaign(camp_var))
+        
+        # Setup abort button
+        if CONF_CAMPAIGN_ABORT_BUTTON in camp_conf:
+            btn_conf = camp_conf[CONF_CAMPAIGN_ABORT_BUTTON]
+            btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
+            await cg.register_component(btn_var, btn_conf)
+            await button.register_button(btn_var, btn_conf)
+            cg.add(btn_var.set_campaign(camp_var))
+        
+        # Setup running binary sensor
+        if CONF_CAMPAIGN_RUNNING in camp_conf:
+            running_conf = camp_conf[CONF_CAMPAIGN_RUNNING]
+            running_var = cg.new_Pvariable(running_conf[CONF_ID])
+            await cg.register_component(running_var, running_conf)
+            await binary_sensor.register_binary_sensor(running_var, running_conf)
+            cg.add(running_var.set_campaign(camp_var))
+            cg.add(camp_var.set_running_sensor(running_var))
+        
+        # Setup result sensors
+        if CONF_CAMPAIGN_RESULT_SENSORS in camp_conf:
+            result_conf = camp_conf[CONF_CAMPAIGN_RESULT_SENSORS]
+            for ch_key, ch_type in [
+                (CONF_PRESSURE, CHANNEL_TYPE_PRESSURE),
+                (CONF_PH, CHANNEL_TYPE_PH),
+                (CONF_ORP, CHANNEL_TYPE_ORP),
+            ]:
+                if ch_key in result_conf:
+                    res_sens_conf = result_conf[ch_key]
+                    res_sens_var = cg.new_Pvariable(res_sens_conf[CONF_ID])
+                    await cg.register_component(res_sens_var, res_sens_conf)
+                    await sensor.register_sensor(res_sens_var, res_sens_conf)
+                    cg.add(res_sens_var.set_campaign(camp_var))
+                    cg.add(res_sens_var.set_channel_type(ch_type))
+                    if "tag" in res_sens_conf:
+                        cg.add(res_sens_var.set_tag(res_sens_conf["tag"]))
+        
+        # Register campaign with parent
+        cg.add(parent_var.register_campaign(camp_var))
+
+
 async def to_code(config):
     """Generate C++ code for pool_station component."""
     var = cg.new_Pvariable(config[CONF_ID])
@@ -858,6 +1297,9 @@ async def to_code(config):
                 cal_temp_var = await sensor.new_sensor(cal_temp_conf)
                 cg.add(ch_var.set_calibration_temp_sensor(cal_temp_var))
             
+            # Setup Gate (Lot 6)
+            await setup_channel_gate(ch_conf, var, ch_var, channel_type, channel_key)
+            
             # Register channel with parent
             cg.add(var.register_channel(ch_var, channel_type))
     
@@ -867,3 +1309,6 @@ async def to_code(config):
         if CONF_WATER_TEMPERATURE_SENSOR_ID in wt_config:
             wt_sensor = await cg.get_variable(wt_config[CONF_WATER_TEMPERATURE_SENSOR_ID])
             cg.add(var.set_water_temperature_sensor(wt_sensor))
+    
+    # Setup Campaigns (Lot 6)
+    await setup_campaigns(config, var)

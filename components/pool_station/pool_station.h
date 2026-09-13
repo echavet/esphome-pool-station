@@ -9,6 +9,8 @@
 #include "channel_filter.h"
 #include "channel_diagnostics.h"
 #include "temperature_compensation.h"
+#include "measurement_gate.h"
+#include "measurement_campaign.h"
 #include <vector>
 #include <map>
 #include <functional>
@@ -70,6 +72,15 @@ class DiagnosticOutOfRangeFlag;
 // Temperature compensation forward declarations (Lot 5)
 class TempCompensationSwitch;
 
+// Gates and campaigns forward declarations (Lot 6)
+class MeasurementGate;
+class MeasurementCampaign;
+class GateBlockedBinarySensor;
+class CampaignStartButton;
+class CampaignAbortButton;
+class CampaignRunningSensor;
+class CampaignResultSensor;
+
 /**
  * Main pool_station component.
  * 
@@ -121,6 +132,11 @@ class PoolStationComponent : public PollingComponent {
   void register_dfrobot_offset_number(DFRobotOffsetNumber *num, uint8_t channel_type);
   void register_cal_invalid_sensor(CalibrationInvalidSensor *sensor, uint8_t channel_type);
 
+  // Campaign registration (Lot 6)
+  void register_campaign(MeasurementCampaign *campaign);
+  MeasurementCampaign *get_campaign(const std::string &name);
+  const std::map<std::string, MeasurementCampaign *> &get_campaigns() const { return this->campaigns_; }
+
  protected:
   uint32_t calibration_interval_{1000};
   bool calibration_mode_active_{false};
@@ -143,6 +159,9 @@ class PoolStationComponent : public PollingComponent {
   std::map<uint8_t, DFRobotMidNumber *> dfrobot_mid_numbers_;
   std::map<uint8_t, DFRobotOffsetNumber *> dfrobot_offset_numbers_;
   std::map<uint8_t, CalibrationInvalidSensor *> cal_invalid_sensors_;
+
+  // Campaigns (Lot 6)
+  std::map<std::string, MeasurementCampaign *> campaigns_;
 };
 
 
@@ -237,6 +256,14 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void set_temp_compensation_switch(TempCompensationSwitch *sw) { this->temp_comp_switch_ = sw; }
   void set_calibration_temp_sensor(sensor::Sensor *sensor) { this->cal_temp_sensor_ = sensor; }
   
+  // Gate configuration (Lot 6)
+  void set_gate(MeasurementGate *gate) { this->gate_ = gate; }
+  MeasurementGate *get_gate() const { return this->gate_; }
+  void set_gate_blocked_sensor(GateBlockedBinarySensor *sensor) { this->gate_blocked_sensor_ = sensor; }
+  
+  // Check if sampling is currently gated (blocked)
+  bool is_gated() const;
+  
   // Temperature compensation accessors (Lot 5)
   bool is_temp_compensation_enabled() const { return this->temp_compensator_.is_enabled(); }
   const TemperatureCompensator &get_temp_compensator() const { return this->temp_compensator_; }
@@ -312,6 +339,10 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   TemperatureCompensator temp_compensator_;
   TempCompensationSwitch *temp_comp_switch_{nullptr};
   sensor::Sensor *cal_temp_sensor_{nullptr};  // Shows Tw at last calibration
+  
+  // Gate (Lot 6)
+  MeasurementGate *gate_{nullptr};
+  GateBlockedBinarySensor *gate_blocked_sensor_{nullptr};
   
   // Callback ID for source sensor subscription
   optional<CallbackManager<void(float)>::CancelToken> source_callback_;
