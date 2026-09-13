@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-09-13
+
+### Fixed — Campaign Result Sensors Schema Validation
+
+#### CRIT: Campaign Result Sensors Missing Platform Schema (KeyError: 'disabled_by_default')
+- **Root cause**: `campaign_result_sensor_schema()` used bare `cv.Schema({...})` instead of `sensor.sensor_schema()`
+- ESPHome 2026.4.x requires entity keys (`disabled_by_default`, `state_class`, etc.) that only platform schemas provide
+- **Fix**: Changed `campaign_result_sensor_schema()` to use `sensor.sensor_schema(CampaignResultSensor, ...)` with `.extend()` for custom `tag` field
+- Audited ALL register_* calls — all configs now pass through proper platform schemas
+
+#### Schema audit summary:
+| Entity Type | Schema Function | Status |
+|-------------|-----------------|--------|
+| Capturer buttons | `button.button_schema()` | ✅ Fixed in 0.7.4 |
+| Capturer numbers | `number.number_schema()` | ✅ Fixed in 0.7.4 |
+| Campaign result sensors | `sensor.sensor_schema()` | ✅ Fixed in 0.7.5 |
+| Diagnostic flags | `binary_sensor.binary_sensor_schema()` | ✅ Already OK |
+| Gate blocked | `binary_sensor.binary_sensor_schema()` | ✅ Already OK |
+| Campaign buttons | `button.button_schema()` | ✅ Already OK |
+| Algorithm select | `select.select_schema()` | ✅ Already OK |
+| Temp comp switch | `switch.switch_schema()` | ✅ Already OK |
+
+---
+
 ## [0.7.4] - 2026-09-13
 
 ### Fixed — Robust Schema Validation for Dynamic Entities
@@ -569,7 +593,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.4** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.5** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

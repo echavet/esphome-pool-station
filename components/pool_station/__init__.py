@@ -681,14 +681,20 @@ def campaign_prepare_action_schema():
 
 
 def campaign_result_sensor_schema(channel_type):
-    """Schema for campaign result sensor."""
+    """Schema for campaign result sensor.
+    
+    Uses sensor.sensor_schema() to include all required ESPHome entity defaults
+    (disabled_by_default, state_class, etc.).
+    """
     defaults = CHANNEL_DEFAULTS.get(channel_type, {})
-    return cv.Schema({
-        cv.GenerateID(): cv.declare_id(CampaignResultSensor),
-        cv.Optional(CONF_NAME): cv.string,
-        cv.Optional(CONF_UNIT_OF_MEASUREMENT, default=defaults.get("unit", "")): cv.string,
-        cv.Optional(CONF_ACCURACY_DECIMALS, default=defaults.get("accuracy", 2)): cv.int_range(0, 5),
-        cv.Optional(CONF_ICON, default=defaults.get("icon", "mdi:gauge")): cv.icon,
+    return sensor.sensor_schema(
+        CampaignResultSensor,
+        unit_of_measurement=defaults.get("unit", ""),
+        accuracy_decimals=defaults.get("accuracy", 2),
+        icon=defaults.get("icon", "mdi:gauge"),
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ).extend({
         cv.Optional("tag"): cv.string,  # Filter by conditions tag
     })
 
