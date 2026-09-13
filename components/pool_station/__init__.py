@@ -319,7 +319,7 @@ CHANNEL_DEFAULTS = {
         "unit": "pH",
         "accuracy": 2,
         "icon": "mdi:ph",
-        "device_class": None,
+        # No device_class - pH has no standard HA device class
         "raw_unit": "V",
         "raw_accuracy": 3,
         "y_unit": "pH",
@@ -330,7 +330,7 @@ CHANNEL_DEFAULTS = {
         "unit": "mV",
         "accuracy": 0,
         "icon": "mdi:flash",
-        "device_class": None,
+        # No device_class - ORP has no standard HA device class
         "raw_unit": "V",
         "raw_accuracy": 3,
         "y_unit": "mV",
@@ -779,16 +779,28 @@ def channel_schema(channel_type):
     (name, unit, icon, state_class, device_class) via ESPHome's standard
     codegen helpers, avoiding manual setter calls that may not be available
     in all ESPHome versions.
+    
+    Note: device_class is only passed when it has a valid value. Passing
+    device_class=None triggers ESPHome's "string value is None" validation
+    error in ESPHome 2026.4+.
     """
     defaults = CHANNEL_DEFAULTS.get(channel_type, {})
     
+    # Build sensor_schema kwargs dynamically - only include device_class
+    # when it has a valid value to avoid ESPHome validation error
+    schema_kwargs = {
+        "unit_of_measurement": defaults.get("unit", ""),
+        "accuracy_decimals": defaults.get("accuracy", 2),
+        "icon": defaults.get("icon", "mdi:gauge"),
+        "state_class": STATE_CLASS_MEASUREMENT,
+    }
+    device_class = defaults.get("device_class")
+    if device_class is not None:
+        schema_kwargs["device_class"] = device_class
+    
     return sensor.sensor_schema(
         PoolStationChannelSensor,
-        unit_of_measurement=defaults.get("unit", ""),
-        accuracy_decimals=defaults.get("accuracy", 2),
-        icon=defaults.get("icon", "mdi:gauge"),
-        device_class=defaults.get("device_class"),
-        state_class=STATE_CLASS_MEASUREMENT,
+        **schema_kwargs,
     ).extend({
         cv.Required(CONF_SOURCE_ID): cv.use_id(sensor.Sensor),
         cv.Optional(CONF_UPDATE_INTERVAL, default="1s"): cv.update_interval,

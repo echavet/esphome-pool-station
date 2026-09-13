@@ -75,31 +75,31 @@ SENSOR_DEFAULTS = {
     "ph_raw": {
         "unit": "V",
         "accuracy": 3,
-        "device_class": None,
+        # No device_class - raw voltage
         "icon": "mdi:flask",
     },
     "ph_calibrated": {
         "unit": "pH",
         "accuracy": 2,
-        "device_class": None,
+        # No device_class - pH has no standard HA device class
         "icon": "mdi:ph",
     },
     "orp_raw": {
         "unit": "V",
         "accuracy": 3,
-        "device_class": None,
+        # No device_class - raw voltage
         "icon": "mdi:flash",
     },
     "orp_calibrated": {
         "unit": "mV",
         "accuracy": 0,
-        "device_class": None,
+        # No device_class - ORP has no standard HA device class
         "icon": "mdi:flash",
     },
     "pressure_raw": {
         "unit": "V",
         "accuracy": 3,
-        "device_class": None,
+        # No device_class - raw voltage
         "icon": "mdi:gauge",
     },
     "pressure_calibrated": {

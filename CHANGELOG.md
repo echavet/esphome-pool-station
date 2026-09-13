@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.10] - 2026-09-13
+
+### Fixed — "string value is None" Validation Error for pH/ORP Channels
+
+#### CRIT: device_class=None Triggers ESPHome 2026.4+ Validation Error
+- **Error**: `string value is None.` appearing after each channel block during `esphome config` validation
+- **Root cause**: `channel_schema()` passed `device_class=defaults.get("device_class")` to `sensor.sensor_schema()`. For pH and ORP channels, `CHANNEL_DEFAULTS` set `"device_class": None`, and passing `device_class=None` explicitly triggers ESPHome's string validation which rejects `None` values
+- **Affected channels**: pH, ORP (pressure worked because it has `device_class=DEVICE_CLASS_PRESSURE`)
+- **Fix**:
+  - Modified `channel_schema()` to build kwargs dynamically and only include `device_class` when it has a valid non-None value
+  - Removed `"device_class": None` entries from `CHANNEL_DEFAULTS` in `__init__.py` and `SENSOR_DEFAULTS` in `sensor.py`
+  - Added comments documenting that pH/ORP have no standard Home Assistant device class
+- register_sensor approach from v0.7.9 preserved
+
+---
+
 ## [0.7.9] - 2026-09-13
 
 ### Fixed — PoolStationChannelSensor Entity Metadata Setters
@@ -661,7 +677,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.9** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.10** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)
