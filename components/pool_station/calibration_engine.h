@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
+#include <functional>
 #include "esphome/core/log.h"
 #include "esphome/core/preferences.h"
 
@@ -100,13 +101,18 @@ static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCAL10005;     // Lot 5 mag
  * - Points can be seeded from YAML and overridden at runtime
  * - Runtime changes persist to flash (ESPHome preferences)
  * - Validation ensures minimum points for algorithm
+ * 
+ * Lot 7 additions:
+ * - Draft/Commit workflow: Capturer edits draft set, live set used for publishing
+ * - Runtime algorithm selection with automatic revalidation
+ * - Add/remove point functionality
  */
 class CalibrationEngine {
  public:
   CalibrationEngine() = default;
   
   // Configuration
-  void set_type(CalibrationType type) { this->type_ = type; }
+  void set_type(CalibrationType type);
   CalibrationType get_type() const { return this->type_; }
   const char *get_type_name() const;
   
@@ -128,24 +134,58 @@ class CalibrationEngine {
   float get_calibration_temperature() const { return this->calibration_temperature_; }
   bool has_calibration_temperature() const { return !std::isnan(this->calibration_temperature_); }
   
-  // Point management
+  // =========================================================================
+  // Point management (Lot 7: operates on draft set when draft mode enabled)
+  // =========================================================================
   void add_point(float x, float y);
   void set_point(size_t index, float x, float y);
   void remove_point(size_t index);
   void clear_points();
   
-  size_t get_point_count() const { return this->points_.size(); }
+  size_t get_point_count() const;
   CalibrationPoint get_point(size_t index) const;
-  const std::vector<CalibrationPoint> &get_points() const { return this->points_; }
+  const std::vector<CalibrationPoint> &get_points() const;
   
   // Seed points from YAML (initial calibration, can be replaced)
   void set_seed_points(const std::vector<CalibrationPoint> &points);
   
+  // =========================================================================
+  // Draft/Commit workflow (Lot 7)
+  // =========================================================================
+  // Enable draft mode - subsequent edits go to draft set
+  void enable_draft_mode();
+  // Disable draft mode - edits go directly to live set (legacy behavior)
+  void disable_draft_mode();
+  // Check if draft mode is active
+  bool is_draft_mode() const { return this->draft_mode_enabled_; }
+  // Check if there are uncommitted draft changes
+  bool has_draft_changes() const { return this->has_draft_changes_; }
+  
+  // Commit draft changes to live set (also saves to preferences)
+  void commit_draft();
+  // Discard draft changes and revert to live set
+  void discard_draft();
+  
+  // Get the live/committed point count (for calibration)
+  size_t get_live_point_count() const { return this->live_points_.size(); }
+  const std::vector<CalibrationPoint> &get_live_points() const { return this->live_points_; }
+  
+  // =========================================================================
+  // Runtime algorithm change (Lot 7)
+  // =========================================================================
+  // Change algorithm at runtime and revalidate points
+  void set_type_runtime(CalibrationType type);
+  // Callback type for validation state changes
+  using ValidationCallback = std::function<void(bool is_valid)>;
+  void set_validation_callback(ValidationCallback callback) { this->validation_callback_ = callback; }
+  
   // Validation
   bool is_valid() const;
+  bool is_draft_valid() const;
   uint8_t get_minimum_points() const;
+  uint8_t get_minimum_points_for_type(CalibrationType type) const;
   
-  // Main calibration function
+  // Main calibration function (uses LIVE points, not draft)
   float calibrate(float raw_voltage) const;
   
   // Persistence
@@ -177,10 +217,30 @@ class CalibrationEngine {
   // Calibration temperature (Lot 5) - Tw at last save
   float calibration_temperature_{NAN};
   
-  // Calibration points (sorted by x for piecewise)
-  std::vector<CalibrationPoint> points_;
+  // =========================================================================
+  // Lot 7: Draft/Commit workflow
+  // =========================================================================
+  // Live/committed points (used for actual calibration)
+  std::vector<CalibrationPoint> live_points_;
+  // Draft points (edited by Capturer UI, not used until committed)
+  std::vector<CalibrationPoint> draft_points_;
+  // Draft mode state
+  bool draft_mode_enabled_{false};
+  bool has_draft_changes_{false};
   
-  // Polynomial coefficients (computed on demand)
+  // For backward compatibility, points_ is an alias to current working set
+  std::vector<CalibrationPoint> &points_() { 
+    return draft_mode_enabled_ ? draft_points_ : live_points_; 
+  }
+  const std::vector<CalibrationPoint> &points_() const { 
+    return draft_mode_enabled_ ? draft_points_ : live_points_; 
+  }
+  
+  // Validation state change callback (Lot 7)
+  ValidationCallback validation_callback_{nullptr};
+  void notify_validation_changed_();
+  
+  // Polynomial coefficients (computed on demand, uses live points)
   mutable std::vector<float> poly_coeffs_;
   mutable bool poly_coeffs_valid_{false};
   

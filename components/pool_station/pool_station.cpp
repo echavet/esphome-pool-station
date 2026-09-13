@@ -399,6 +399,14 @@ void PoolStationChannelSensor::set_preferences_key(uint32_t key) {
   this->calibration_.set_preferences_key(key);
 }
 
+void PoolStationChannelSensor::set_draft_mode_enabled(bool enabled) {
+  if (enabled) {
+    this->calibration_.enable_draft_mode();
+  } else {
+    this->calibration_.disable_draft_mode();
+  }
+}
+
 void PoolStationChannelSensor::set_filter_samples(uint8_t samples) {
   this->filter_config_.filter_samples = samples;
 }

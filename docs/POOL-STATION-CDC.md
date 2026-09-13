@@ -116,12 +116,15 @@
 
 ### F-HA : Intégration Home Assistant
 
-| ID | Exigence | Lot |
-|----|----------|-----|
-| F-HA-01 | Entités sensor standard | 0 |
-| F-HA-02 | Attributs diagnostics | 4 |
-| F-HA-03 | Services calibration | 7 |
-| F-HA-04 | Notifications calibration périmée | 7 |
+| ID | Exigence | Lot | Status |
+|----|----------|-----|--------|
+| F-HA-01 | Entités sensor standard | 0 | ✅ Done |
+| F-HA-02 | Attributs diagnostics | 4 | ✅ Done |
+| F-HA-03 | Services calibration (via UI) | 7 | ✅ Done |
+| F-HA-04 | Notifications calibration périmée (cal_invalid) | 7 | ✅ Done |
+| F-HA-05 | Runtime algorithm selection | 7 | ✅ Done |
+| F-HA-06 | Draft/Commit workflow | 7 | ✅ Done |
+| F-HA-07 | Add/remove calibration points | 7 | ✅ Done |
 
 ## 4. Exigences non-fonctionnelles
 
@@ -167,9 +170,9 @@
 | 2 | N-point calibration, Capturer, persistence | ✅ Done |
 | 3 | Filters (j5-like median, jump, clamp) | ✅ Done |
 | 4 | Diagnostics (noise σ/ptp, stuck, flags) | ✅ Done |
-| **5** | **Water temp compensation (Tw)** | ✅ **Current** |
+| 5 | Water temp compensation (Tw) | ✅ Done |
 | 6 | Gates/campaigns | Planned |
-| 7 | HA polish, runtime algo select, services | Planned |
+| **7** | **HA polish, runtime algo select, draft/commit** | ✅ **Current** |
 | 8 | (Optionnel) Interference detection, EZO | Future |
 
 ## 8. Critères d'acceptation
