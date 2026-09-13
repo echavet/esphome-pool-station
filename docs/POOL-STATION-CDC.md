@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.1 (Lot 7 — Post-review fixes)  
+> Version: 0.7.2 (Lot 7 — Codegen fix)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 
