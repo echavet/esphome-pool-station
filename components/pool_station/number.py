@@ -135,7 +135,7 @@ async def to_code(config):
 async def new_calibration_point_x_number(config, parent, channel_type, point_index):
     """Create a calibration point X number entity."""
     var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
+    # register_number already registers the Component (ESPHome 2026.4).
     await number.register_number(
         var, config,
         min_value=config[CONF_MIN_VALUE],
@@ -153,7 +153,6 @@ async def new_calibration_point_x_number(config, parent, channel_type, point_ind
 async def new_calibration_point_y_number(config, parent, channel_type, point_index):
     """Create a calibration point Y number entity."""
     var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
     await number.register_number(
         var, config,
         min_value=config[CONF_MIN_VALUE],
@@ -171,7 +170,6 @@ async def new_calibration_point_y_number(config, parent, channel_type, point_ind
 async def new_dfrobot_mid_number(config, parent, channel_type):
     """Create a DFRobot mid_mv number entity."""
     var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
     await number.register_number(
         var, config,
         min_value=config[CONF_MIN_VALUE],
@@ -188,7 +186,6 @@ async def new_dfrobot_mid_number(config, parent, channel_type):
 async def new_dfrobot_offset_number(config, parent, channel_type):
     """Create a DFRobot offset_mv number entity."""
     var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
     await number.register_number(
         var, config,
         min_value=config[CONF_MIN_VALUE],

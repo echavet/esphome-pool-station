@@ -982,12 +982,13 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
                 CONF_NAME: f"{channel_key.title()} Cal Point {point_idx + 1} X",
             })
             num_x_var = cg.new_Pvariable(num_x_conf[CONF_ID])
-            # Parent/index before register_component so setup() can publish.
+            # Parent/index before register_number so setup() can publish.
+            # Do NOT call cg.register_component: number.register_number already
+            # registers the Component (ESPHome 2026.4 ValueError if done twice).
             cg.add(num_x_var.set_parent(parent_var))
             cg.add(num_x_var.set_channel_type(channel_type))
             cg.add(num_x_var.set_point_index(point_idx))
             cg.add(parent_var.register_point_x_number(num_x_var, channel_type, point_idx))
-            await cg.register_component(num_x_var, num_x_conf)
             await number.register_number(
                 num_x_var, num_x_conf,
                 min_value=-10.0,
@@ -1008,7 +1009,6 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
             cg.add(num_y_var.set_channel_type(channel_type))
             cg.add(num_y_var.set_point_index(point_idx))
             cg.add(parent_var.register_point_y_number(num_y_var, channel_type, point_idx))
-            await cg.register_component(num_y_var, num_y_conf)
             await number.register_number(
                 num_y_var, num_y_conf,
                 min_value=defaults.get("y_min", -1000.0),
@@ -1116,7 +1116,7 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         cg.add(count_var.set_parent(parent_var))
         cg.add(count_var.set_channel_type(channel_type))
         cg.add(parent_var.register_point_count_number(count_var, channel_type))
-        await cg.register_component(count_var, count_conf)
+        # number.register_number already registered the Component.
     
     # Draft mode configuration
     draft_mode_enabled = capturer_conf.get(CONF_DRAFT_MODE, False)

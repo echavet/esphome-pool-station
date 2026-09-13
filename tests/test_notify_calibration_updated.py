@@ -310,8 +310,12 @@ class CodegenRegistrationTest(unittest.TestCase):
         self.assertIn("register_point_x_number", attrs)
         self.assertIn("register_point_y_number", attrs)
 
-    def test_point_numbers_register_component_before_ha_discovery(self):
-        """Capturer X/Y numbers need setup() so publish_state reaches HA (0.7.12 class)."""
+    def test_point_numbers_do_not_double_register_component(self):
+        """ESPHome 2026.4: register_number already registers the Component.
+
+        v0.7.14 added cg.register_component before register_number and
+        `esphome config` failed: Component ID pressure_point0_x ... registered twice.
+        """
         with open(INIT_PATH, encoding="utf-8") as handle:
             source = handle.read()
         start = source.find("# Point X number (raw voltage)")
@@ -319,14 +323,53 @@ class CodegenRegistrationTest(unittest.TestCase):
         self.assertGreater(start, 0)
         self.assertGreater(end, start)
         block = source[start:end]
-        self.assertGreaterEqual(block.count("await cg.register_component("), 2)
+        self.assertNotIn("await cg.register_component(", block)
+        self.assertEqual(block.count("await number.register_number("), 2)
         self.assertIn("register_point_x_number", block)
         self.assertIn("register_point_y_number", block)
-        self.assertLess(block.find("set_parent("), block.find("await cg.register_component("))
-        self.assertLess(
-            block.find("register_point_x_number"),
-            block.find("await cg.register_component("),
-        )
+        self.assertLess(block.find("set_parent("), block.find("await number.register_number("))
+
+        count_start = source.find("# Point count number")
+        count_end = source.find("# Draft mode configuration", count_start)
+        self.assertGreater(count_end, count_start)
+        count_block = source[count_start:count_end]
+        self.assertNotIn("await cg.register_component(", count_block)
+        self.assertIn("await number.register_number(", count_block)
+
+    def test_number_py_helpers_do_not_double_register(self):
+        number_py = os.path.join(ROOT, "components", "pool_station", "number.py")
+        with open(number_py, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertNotIn("register_component", source)
+        self.assertGreaterEqual(source.count("await number.register_number("), 4)
+
+    def test_esphome_2026_register_number_rejects_double_component(self):
+        """Reproduce the ESPHome 2026.4 ValueError without importing esphome."""
+        registered = set()
+
+        def register_component(component_id):
+            if component_id in registered:
+                raise ValueError(
+                    f"Component ID {component_id} was not declared to inherit "
+                    "from Component, or was registered twice."
+                )
+            registered.add(component_id)
+
+        def register_number(component_id):
+            register_component(component_id)
+
+        # v0.7.14 capturer path (must fail)
+        with self.assertRaises(ValueError) as ctx:
+            register_component("pressure_point0_x")
+            register_number("pressure_point0_x")
+        self.assertIn("pressure_point0_x", str(ctx.exception))
+        self.assertIn("registered twice", str(ctx.exception))
+
+        # v0.7.15 capturer path (register_number only)
+        registered.clear()
+        register_number("pressure_point0_x")
+        register_number("pressure_point0_y")
+        self.assertEqual(registered, {"pressure_point0_x", "pressure_point0_y"})
 
     def test_docs_distinguish_slots_from_live_count(self):
         with open(INIT_PATH, encoding="utf-8") as handle:

@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.14 (Lot 7 — Capturer UI sync after add/remove)  
+> Version: 0.7.15 (Lot 7 — Capturer number codegen: no double register_component)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 

@@ -42,7 +42,7 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 - ✅ **Runtime algorithm select**: Change calibration type from HA without reflash
 - ✅ **Add/remove calibration points**: Dynamic point management from UI
 - ✅ **Point count number**: Live engine count + optional resize (1-10)
-- ✅ **Capturer UI sync**: Add/Remove/Save/capture/algo refresh HA numbers (v0.7.14)
+- ✅ **Capturer UI sync**: Add/Remove/Save/capture/algo refresh HA numbers (v0.7.15)
 - ✅ **Draft/Commit workflow**: Edit draft, preview, then commit or discard
 - ✅ **Draft pending sensor**: Shows when uncommitted changes exist
 - ✅ **Migration documentation**: From j5_ha_bridge and pool-firmata-wifi
