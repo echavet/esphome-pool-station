@@ -1,12 +1,13 @@
-# Pool Station — Example Configuration (Lot 3)
+# Pool Station — Example Configuration (Lot 4)
 # 
-# This configuration demonstrates Lot 2 and Lot 3 features:
+# This configuration demonstrates Lot 2, 3, and 4 features:
 #   - N-point calibration with multiple algorithms
 #   - Capturer UI for calibration from Home Assistant
 #   - Calibration persistence across reboots
 #   - cal_invalid indicator when calibration is insufficient
 #   - Lot 3: Filters (median window, jump guard, min/max clamp)
 #   - Lot 3: Calibrated sensor (pre-guard diagnostic)
+#   - Lot 4: Diagnostics (noise detection, stuck detection, out-of-range flags)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -206,6 +207,14 @@ pool_station:
       #   filter_samples: 0     # No median (default)
       #   max_jump: 0.0         # No jump guard (default)
       
+      # Diagnostics: Minimal for pressure (can enable without heavy filters)
+      # Only out-of-range detection, no noise/stuck (fast response needed)
+      diagnostics:
+        range_min: 0.0
+        range_max: 15.0
+        out_of_range:
+          name: "Pressure Out Of Range"
+      
       # Capturer UI - allows editing calibration from HA
       capturer:
         point_count: 2
@@ -263,6 +272,34 @@ pool_station:
         value_min: 0.0           # Clamp to valid pH range
         value_max: 14.0
       
+      # Diagnostics (Lot 4): Full noise/stuck/range monitoring
+      # These sensors and flags are opt-in (only created if declared)
+      diagnostics:
+        noise_window: 10         # 10-sample sliding window for stats
+        noise_warn_ptp: 0.3      # Warn if peak-to-peak > 0.3 pH
+        noise_warn_sigma: 0.1    # Warn if stddev > 0.1 pH
+        stuck_timeout: 300s      # Warn if no change for 5 minutes
+        stuck_threshold: 0.01    # Minimum change to consider "not stuck"
+        range_min: 0.0           # Out-of-range below 0 pH
+        range_max: 14.0          # Out-of-range above 14 pH
+        log_rate_limit: 60s      # Log warnings at most once per minute
+        
+        # Optional diagnostic sensors (Lovelace-friendly)
+        mean_sensor:
+          name: "Pool pH Mean"
+        sigma_sensor:
+          name: "Pool pH Noise (σ)"
+        ptp_sensor:
+          name: "Pool pH Peak-to-Peak"
+        
+        # Optional diagnostic flags (binary_sensors)
+        noisy:
+          name: "Pool pH Noisy"
+        stuck:
+          name: "Pool pH Stuck"
+        out_of_range:
+          name: "Pool pH Out Of Range"
+      
       # Capturer UI - 3 points for pH 4/7/10 calibration
       capturer:
         point_count: 3
@@ -311,6 +348,23 @@ pool_station:
         max_jump_streak: 4       # Accept new level after 4 consistent readings
         value_min: -500.0        # Reasonable ORP range
         value_max: 1000.0
+      
+      # Diagnostics (Lot 4): ORP monitoring with appropriate thresholds
+      diagnostics:
+        noise_window: 10
+        noise_warn_ptp: 30.0     # Warn if peak-to-peak > 30 mV
+        noise_warn_sigma: 10.0   # Warn if stddev > 10 mV
+        stuck_timeout: 600s      # ORP changes slower, 10 min timeout
+        range_min: -200.0        # Very negative ORP is suspicious
+        range_max: 900.0         # Above 900 mV is unusual for pools
+        
+        # Only flags for ORP (no stats sensors to reduce entity count)
+        noisy:
+          name: "Pool ORP Noisy"
+        stuck:
+          name: "Pool ORP Stuck"
+        out_of_range:
+          name: "Pool ORP Out Of Range"
       
       # Capturer UI - includes mid/offset numbers for DFRobot
       capturer:
@@ -388,6 +442,44 @@ pool_station:
 # PRESSURE: Keep filters OFF (fast response needed)
 # pH: Mild median (5) + jump guard (0.5) + clamp (0-14)
 # ORP: Light median (3) + jump guard (50mV) + clamp
+#
+# =============================================================================
+# DIAGNOSTICS CONFIGURATION (Lot 4)
+# =============================================================================
+#
+# diagnostics:
+#   noise_window: 2-50      # Sliding window size for statistics
+#   noise_warn_ptp: 0.0+    # Peak-to-peak threshold for noisy flag (0 = off)
+#   noise_warn_sigma: 0.0+  # Stddev threshold for noisy flag (0 = off)
+#   stuck_timeout: 0s+      # Time without change for stuck flag (0 = off)
+#   stuck_threshold: 0.001  # Minimum change to consider "not stuck"
+#   range_min: float        # Out-of-range minimum (omit = no check)
+#   range_max: float        # Out-of-range maximum (omit = no check)
+#   log_rate_limit: 60s     # Rate limit for diagnostic log messages
+#
+#   # Optional sensors (only created if declared):
+#   mean_sensor:           # Mean of values in sliding window
+#     name: "Channel Mean"
+#   sigma_sensor:          # Standard deviation (noise indicator)
+#     name: "Channel Noise"
+#   ptp_sensor:            # Peak-to-peak (max - min)
+#     name: "Channel PTP"
+#
+#   # Optional binary_sensor flags (only created if declared):
+#   noisy:                 # True when ptp or sigma exceeds threshold
+#     name: "Channel Noisy"
+#   stuck:                 # True when no meaningful change for stuck_timeout
+#     name: "Channel Stuck"
+#   out_of_range:          # True when value outside range_min/max
+#     name: "Channel Out Of Range"
+#
+# LOVELACE-FRIENDLY ENTITY NAMES (Lot 4):
+#   - sensor.pool_ph_mean           → Mean pH over noise_window samples
+#   - sensor.pool_ph_noise          → Stddev (σ) of pH readings
+#   - sensor.pool_ph_peak_to_peak   → Max - Min over window
+#   - binary_sensor.pool_ph_noisy   → ON when noise exceeds thresholds
+#   - binary_sensor.pool_ph_stuck   → ON when no change for stuck_timeout
+#   - binary_sensor.pool_ph_out_of_range → ON when outside valid range
 #
 # =============================================================================
 # CALIBRATION ALGORITHMS AVAILABLE

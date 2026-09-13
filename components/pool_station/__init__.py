@@ -73,6 +73,17 @@ CalibrationInvalidSensor = pool_station_ns.class_(
     "CalibrationInvalidSensor", binary_sensor.BinarySensor, cg.Component
 )
 
+# Diagnostic flag binary sensors (Lot 4)
+DiagnosticNoisyFlag = pool_station_ns.class_(
+    "DiagnosticNoisyFlag", binary_sensor.BinarySensor, cg.Component
+)
+DiagnosticStuckFlag = pool_station_ns.class_(
+    "DiagnosticStuckFlag", binary_sensor.BinarySensor, cg.Component
+)
+DiagnosticOutOfRangeFlag = pool_station_ns.class_(
+    "DiagnosticOutOfRangeFlag", binary_sensor.BinarySensor, cg.Component
+)
+
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
 CONF_CALIBRATION_MODE = "calibration_mode"
@@ -92,6 +103,25 @@ CONF_MAX_JUMP = "max_jump"
 CONF_MAX_JUMP_STREAK = "max_jump_streak"
 CONF_VALUE_MIN = "value_min"
 CONF_VALUE_MAX = "value_max"
+
+# Diagnostics configuration keys (Lot 4)
+CONF_DIAGNOSTICS = "diagnostics"
+CONF_NOISE_WINDOW = "noise_window"
+CONF_NOISE_WARN_PTP = "noise_warn_ptp"
+CONF_NOISE_WARN_SIGMA = "noise_warn_sigma"
+CONF_STUCK_TIMEOUT = "stuck_timeout"
+CONF_STUCK_THRESHOLD = "stuck_threshold"
+CONF_RANGE_MIN = "range_min"
+CONF_RANGE_MAX = "range_max"
+CONF_LOG_RATE_LIMIT = "log_rate_limit"
+# Diagnostic sensors
+CONF_MEAN_SENSOR = "mean_sensor"
+CONF_SIGMA_SENSOR = "sigma_sensor"
+CONF_PTP_SENSOR = "ptp_sensor"
+# Diagnostic binary sensors (flags)
+CONF_NOISY_FLAG = "noisy"
+CONF_STUCK_FLAG = "stuck"
+CONF_OUT_OF_RANGE_FLAG = "out_of_range"
 
 # Calibration configuration keys
 CONF_CALIBRATION = "calibration"
@@ -223,6 +253,84 @@ def filters_schema():
     })
 
 
+def diagnostics_schema(channel_type):
+    """Schema for channel diagnostics configuration (Lot 4).
+    
+    Enables noise detection, stuck detection, and out-of-range flags.
+    Sensors and binary_sensors are opt-in (only created if declared in YAML).
+    
+    - noise_window: Sliding window size for noise statistics
+    - noise_warn_ptp: Peak-to-peak threshold for noisy flag
+    - noise_warn_sigma: Standard deviation threshold for noisy flag
+    - stuck_timeout: Duration without change to trigger stuck flag
+    - stuck_threshold: Minimum change to consider "not stuck"
+    - range_min/range_max: Out-of-range detection bounds
+    - log_rate_limit: Rate limit for diagnostic log messages
+    """
+    defaults = CHANNEL_DEFAULTS.get(channel_type, {})
+    
+    return cv.Schema({
+        # Noise detection thresholds
+        cv.Optional(CONF_NOISE_WINDOW, default=10): cv.int_range(min=2, max=50),
+        cv.Optional(CONF_NOISE_WARN_PTP, default=0.0): cv.float_,
+        cv.Optional(CONF_NOISE_WARN_SIGMA, default=0.0): cv.float_,
+        
+        # Stuck detection
+        cv.Optional(CONF_STUCK_TIMEOUT, default="0s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_STUCK_THRESHOLD, default=0.001): cv.positive_float,
+        
+        # Out-of-range detection (separate from filter clamp)
+        cv.Optional(CONF_RANGE_MIN): cv.float_,
+        cv.Optional(CONF_RANGE_MAX): cv.float_,
+        
+        # Log rate limiting
+        cv.Optional(CONF_LOG_RATE_LIMIT, default="60s"): cv.positive_time_period_milliseconds,
+        
+        # Optional diagnostic sensors (opt-in, only created if declared)
+        cv.Optional(CONF_MEAN_SENSOR): sensor.sensor_schema(
+            unit_of_measurement=defaults.get("unit", ""),
+            accuracy_decimals=defaults.get("accuracy", 2) + 1,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:chart-bell-curve",
+        ),
+        cv.Optional(CONF_SIGMA_SENSOR): sensor.sensor_schema(
+            unit_of_measurement=defaults.get("unit", ""),
+            accuracy_decimals=defaults.get("accuracy", 2) + 2,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:sigma",
+        ),
+        cv.Optional(CONF_PTP_SENSOR): sensor.sensor_schema(
+            unit_of_measurement=defaults.get("unit", ""),
+            accuracy_decimals=defaults.get("accuracy", 2) + 1,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:arrow-expand-vertical",
+        ),
+        
+        # Optional diagnostic flags (binary_sensors, opt-in)
+        cv.Optional(CONF_NOISY_FLAG): binary_sensor.binary_sensor_schema(
+            DiagnosticNoisyFlag,
+            icon="mdi:waveform",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_STUCK_FLAG): binary_sensor.binary_sensor_schema(
+            DiagnosticStuckFlag,
+            icon="mdi:pause-circle",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_OUT_OF_RANGE_FLAG): binary_sensor.binary_sensor_schema(
+            DiagnosticOutOfRangeFlag,
+            icon="mdi:alert-box",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+    })
+
+
 def capturer_schema(channel_type):
     """Schema for capturer UI configuration."""
     return cv.Schema({
@@ -268,6 +376,8 @@ def channel_schema(channel_type):
         cv.Optional(CONF_CALIBRATION): calibration_schema(),
         # Filter configuration (Lot 3)
         cv.Optional(CONF_FILTERS): filters_schema(),
+        # Diagnostics configuration (Lot 4)
+        cv.Optional(CONF_DIAGNOSTICS): diagnostics_schema(channel_type),
         # Capturer UI for calibration
         cv.Optional(CONF_CAPTURER): capturer_schema(channel_type),
         # Calibration invalid binary sensor
@@ -452,6 +562,68 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         cg.add(parent_var.register_dfrobot_offset_number(offset_var, channel_type))
 
 
+async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):
+    """Setup diagnostic sensors and flags for a channel (Lot 4)."""
+    diag_conf = config.get(CONF_DIAGNOSTICS)
+    if diag_conf is None:
+        return
+    
+    # Configure diagnostics thresholds on channel
+    cg.add(channel_var.set_diagnostics_enabled(True))
+    cg.add(channel_var.set_noise_window(diag_conf[CONF_NOISE_WINDOW]))
+    cg.add(channel_var.set_noise_warn_ptp(diag_conf[CONF_NOISE_WARN_PTP]))
+    cg.add(channel_var.set_noise_warn_sigma(diag_conf[CONF_NOISE_WARN_SIGMA]))
+    cg.add(channel_var.set_stuck_timeout_ms(diag_conf[CONF_STUCK_TIMEOUT]))
+    cg.add(channel_var.set_stuck_threshold(diag_conf[CONF_STUCK_THRESHOLD]))
+    cg.add(channel_var.set_log_rate_limit_ms(diag_conf[CONF_LOG_RATE_LIMIT]))
+    
+    if CONF_RANGE_MIN in diag_conf:
+        cg.add(channel_var.set_diagnostics_range_min(diag_conf[CONF_RANGE_MIN]))
+    if CONF_RANGE_MAX in diag_conf:
+        cg.add(channel_var.set_diagnostics_range_max(diag_conf[CONF_RANGE_MAX]))
+    
+    # Optional diagnostic sensors (only create if declared)
+    if CONF_MEAN_SENSOR in diag_conf:
+        mean_sens_var = await sensor.new_sensor(diag_conf[CONF_MEAN_SENSOR])
+        cg.add(channel_var.set_diag_mean_sensor(mean_sens_var))
+    
+    if CONF_SIGMA_SENSOR in diag_conf:
+        sigma_sens_var = await sensor.new_sensor(diag_conf[CONF_SIGMA_SENSOR])
+        cg.add(channel_var.set_diag_sigma_sensor(sigma_sens_var))
+    
+    if CONF_PTP_SENSOR in diag_conf:
+        ptp_sens_var = await sensor.new_sensor(diag_conf[CONF_PTP_SENSOR])
+        cg.add(channel_var.set_diag_ptp_sensor(ptp_sens_var))
+    
+    # Optional diagnostic flags (binary_sensors)
+    if CONF_NOISY_FLAG in diag_conf:
+        noisy_conf = diag_conf[CONF_NOISY_FLAG]
+        noisy_var = cg.new_Pvariable(noisy_conf[CONF_ID])
+        await cg.register_component(noisy_var, noisy_conf)
+        await binary_sensor.register_binary_sensor(noisy_var, noisy_conf)
+        cg.add(noisy_var.set_parent(parent_var))
+        cg.add(noisy_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_diag_noisy_flag(noisy_var))
+    
+    if CONF_STUCK_FLAG in diag_conf:
+        stuck_conf = diag_conf[CONF_STUCK_FLAG]
+        stuck_var = cg.new_Pvariable(stuck_conf[CONF_ID])
+        await cg.register_component(stuck_var, stuck_conf)
+        await binary_sensor.register_binary_sensor(stuck_var, stuck_conf)
+        cg.add(stuck_var.set_parent(parent_var))
+        cg.add(stuck_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_diag_stuck_flag(stuck_var))
+    
+    if CONF_OUT_OF_RANGE_FLAG in diag_conf:
+        oor_conf = diag_conf[CONF_OUT_OF_RANGE_FLAG]
+        oor_var = cg.new_Pvariable(oor_conf[CONF_ID])
+        await cg.register_component(oor_var, oor_conf)
+        await binary_sensor.register_binary_sensor(oor_var, oor_conf)
+        cg.add(oor_var.set_parent(parent_var))
+        cg.add(oor_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_diag_out_of_range_flag(oor_var))
+
+
 async def to_code(config):
     """Generate C++ code for pool_station component."""
     var = cg.new_Pvariable(config[CONF_ID])
@@ -562,6 +734,9 @@ async def to_code(config):
             
             # Setup Capturer UI
             await setup_capturer_ui(ch_conf, var, ch_var, channel_type, channel_key)
+            
+            # Setup Diagnostics (Lot 4)
+            await setup_diagnostics_ui(ch_conf, var, ch_var, channel_type, channel_key)
             
             # Register channel with parent
             cg.add(var.register_channel(ch_var, channel_type))
