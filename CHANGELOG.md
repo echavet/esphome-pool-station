@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.12] - 2026-09-13
+
+### Fixed — Algorithm Select Empty Options in Home Assistant
+
+#### CRIT: `select.*_algorithm` entities stuck at `unknown` with `options: []`
+- **Symptoms**: `select.piscine_pool_station_ph_algorithm` and
+  `select.piscine_pool_station_pression_algorithm` show state `unknown`
+  and an empty options list in Home Assistant (live v0.7.11 / ESPHome 2026.4.3)
+- **Root cause**: capturer codegen called `select.register_select(..., options=[])`.
+  HA discovery uses that list at registration time. C++ `setup()` later called
+  `traits.set_options({...})`, but the entity was already advertised empty and
+  `publish_state()` of the current algorithm failed / stayed unknown.
+  `register_component` was also missing, so `setup()` / `update_from_calibration()`
+  may never run
+- **Scan**: only one `register_select` in this component; no other empty-options selects
+- **Fix**:
+  - Shared `ALGORITHM_SELECT_OPTIONS` (`none`, `linear`, `polynomial`,
+    `piecewise`, `dfrobot_orp`) passed into `select.register_select(...)`
+  - `cg.register_component` after `set_parent` / `set_channel_type` so
+    `setup()` can publish a value that exists in the option list
+  - C++ `set_options` kept as belt-and-suspenders; `update_from_calibration`
+    falls back to `none` if the engine type is not in the exposed list
+
+---
+
 ## [0.7.11] - 2026-09-13
 
 ### Fixed — Channel `filters:` vs ESPHome sensor.register_sensor Collision
@@ -693,7 +718,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.11** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.12** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

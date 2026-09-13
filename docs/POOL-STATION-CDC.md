@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.11 (Lot 7 — Fix filters: vs sensor.register_sensor collision)  
+> Version: 0.7.12 (Lot 7 — Fix algorithm select empty options in Home Assistant)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 

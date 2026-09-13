@@ -389,10 +389,11 @@ std::string CalibrationAlgorithmSelect::type_to_string(CalibrationType type) {
 
 void CalibrationAlgorithmSelect::setup() {
   ESP_LOGD(TAG, "Setting up CalibrationAlgorithmSelect (channel=%d)", this->channel_type_);
-  
-  // Set available options - ESPHome 2026.4 requires initializer_list<const char*>
+
+  // Belt-and-suspenders: must match ALGORITHM_SELECT_OPTIONS (Python codegen).
+  // ESPHome 2026.4 SelectTraits::set_options takes initializer_list<const char*>.
   this->traits.set_options({"none", "linear", "polynomial", "piecewise", "dfrobot_orp"});
-  
+
   this->update_from_calibration();
 }
 
@@ -403,14 +404,26 @@ void CalibrationAlgorithmSelect::dump_config() {
 
 void CalibrationAlgorithmSelect::update_from_calibration() {
   if (this->parent_ == nullptr) return;
-  
+
   PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
   if (channel == nullptr) return;
-  
+
   CalibrationEngine *engine = channel->get_calibration_engine();
   if (engine == nullptr) return;
-  
+
   std::string type_str = type_to_string(engine->get_type());
+  const auto &options = this->traits.get_options();
+  bool known = false;
+  for (const auto &option : options) {
+    if (option == type_str) {
+      known = true;
+      break;
+    }
+  }
+  if (!known) {
+    ESP_LOGW(TAG, "Algorithm '%s' is not in select options; publishing 'none'", type_str.c_str());
+    type_str = "none";
+  }
   this->publish_state(type_str);
 }
 

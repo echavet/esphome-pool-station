@@ -26,6 +26,7 @@ from esphome.const import (
 )
 from esphome.core import coroutine
 from .sensor_register_compat import sensor_register_config
+from .algorithm_select_options import ALGORITHM_SELECT_OPTIONS
 
 CODEOWNERS = ["@echavet"]
 MULTI_CONF = False
@@ -1064,9 +1065,15 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     if CONF_ALGORITHM_SELECT in capturer_conf:
         algo_conf = capturer_conf[CONF_ALGORITHM_SELECT]
         algo_var = cg.new_Pvariable(algo_conf[CONF_ID])
-        await select.register_select(algo_var, algo_conf, options=[])
+        # Parent/channel before register_component so setup() can publish
+        # a current value that exists in the option list.
         cg.add(algo_var.set_parent(parent_var))
         cg.add(algo_var.set_channel_type(channel_type))
+        await cg.register_component(algo_var, algo_conf)
+        # HA discovery uses this list; empty options leave state unknown.
+        await select.register_select(
+            algo_var, algo_conf, options=list(ALGORITHM_SELECT_OPTIONS)
+        )
     
     # Add point button
     if CONF_ADD_POINT_BUTTON in capturer_conf:
