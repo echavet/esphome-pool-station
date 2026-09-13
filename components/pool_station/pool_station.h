@@ -5,6 +5,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "calibration_engine.h"
+#include "channel_filter.h"
 #include <vector>
 #include <map>
 #include <functional>
@@ -181,7 +182,15 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void set_source_sensor(sensor::Sensor *sensor) { this->source_sensor_ = sensor; }
   void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
   void set_raw_sensor(sensor::Sensor *sensor) { this->raw_sensor_ = sensor; }
+  void set_calibrated_sensor(sensor::Sensor *sensor) { this->calibrated_sensor_ = sensor; }
   void set_update_interval(uint32_t interval_ms) { this->configured_interval_ = interval_ms; }
+
+  // Filter configuration (Lot 3)
+  void set_filter_samples(uint8_t samples);
+  void set_max_jump(float max_jump);
+  void set_max_jump_streak(uint8_t streak);
+  void set_value_min(float min);
+  void set_value_max(float max);
 
   // Calibration configuration
   void set_calibration_type(uint8_t type);
@@ -205,20 +214,29 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
 
  protected:
   void on_source_value_(float value);
+  float apply_filters_(float raw_value);
 
   ChannelType channel_type_{CHANNEL_TYPE_PRESSURE};
   PoolStationComponent *parent_{nullptr};
   sensor::Sensor *source_sensor_{nullptr};
   sensor::Sensor *raw_sensor_{nullptr};
+  sensor::Sensor *calibrated_sensor_{nullptr};
   
   uint32_t configured_interval_{1000};
   uint32_t last_update_{0};
   
   float last_raw_value_{NAN};
+  float last_filtered_raw_{NAN};
   float last_calibrated_value_{NAN};
+  float last_guarded_value_{NAN};
   
   // Calibration engine
   CalibrationEngine calibration_;
+  
+  // Filter configuration and state (Lot 3)
+  ChannelFilterConfig filter_config_;
+  SlidingWindow raw_window_;
+  JumpGuard jump_guard_;
   
   // Callback ID for source sensor subscription
   optional<CallbackManager<void(float)>::CancelToken> source_callback_;
