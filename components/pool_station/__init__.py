@@ -26,7 +26,7 @@ from esphome.const import (
 )
 from esphome.core import coroutine
 from .sensor_register_compat import sensor_register_config
-from .algorithm_select_options import ALGORITHM_SELECT_OPTIONS
+from .algorithm_select_options import algorithm_select_options
 
 CODEOWNERS = ["@echavet"]
 MULTI_CONF = False
@@ -1071,8 +1071,9 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         cg.add(algo_var.set_channel_type(channel_type))
         await cg.register_component(algo_var, algo_conf)
         # HA discovery uses this list; empty options leave state unknown.
+        # Options are per-channel: dfrobot_orp is ORP-only.
         await select.register_select(
-            algo_var, algo_conf, options=list(ALGORITHM_SELECT_OPTIONS)
+            algo_var, algo_conf, options=list(algorithm_select_options(channel_type))
         )
     
     # Add point button

@@ -390,9 +390,14 @@ std::string CalibrationAlgorithmSelect::type_to_string(CalibrationType type) {
 void CalibrationAlgorithmSelect::setup() {
   ESP_LOGD(TAG, "Setting up CalibrationAlgorithmSelect (channel=%d)", this->channel_type_);
 
-  // Belt-and-suspenders: must match ALGORITHM_SELECT_OPTIONS (Python codegen).
+  // Belt-and-suspenders: must match algorithm_select_options() (Python codegen).
   // ESPHome 2026.4 SelectTraits::set_options takes initializer_list<const char*>.
-  this->traits.set_options({"none", "linear", "polynomial", "piecewise", "dfrobot_orp"});
+  // dfrobot_orp is ORP-only; pressure/pH must not advertise it.
+  if (this->channel_type_ == CHANNEL_TYPE_ORP) {
+    this->traits.set_options({"none", "linear", "polynomial", "piecewise", "dfrobot_orp"});
+  } else {
+    this->traits.set_options({"none", "linear", "polynomial", "piecewise"});
+  }
 
   this->update_from_calibration();
 }

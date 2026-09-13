@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.13] - 2026-09-13
+
+### Fixed — Algorithm Select Options Are Per-Channel
+
+#### CRIT: `dfrobot_orp` advertised on pH and pressure after v0.7.12
+- **Symptoms**: Home Assistant pH / Pression algorithm selects include `dfrobot_orp`
+- **Root cause**: v0.7.12 used one shared `ALGORITHM_SELECT_OPTIONS` for every channel
+- **Fix**:
+  - pressure / pH: `none`, `linear`, `polynomial`, `piecewise`
+  - ORP: same list plus `dfrobot_orp` (engine also supports linear/polynomial/piecewise)
+  - C++ `CalibrationAlgorithmSelect::setup()` branches on `channel_type_`
+  - Codegen still uses non-empty `register_select` options + `register_component` order from 0.7.12
+
+---
+
 ## [0.7.12] - 2026-09-13
 
 ### Fixed — Algorithm Select Empty Options in Home Assistant
@@ -718,7 +733,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.12** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
+| **7** | **0.7.13** | ✅ **HA polish, runtime algo select, draft/commit** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

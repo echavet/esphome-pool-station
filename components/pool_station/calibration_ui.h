@@ -188,6 +188,8 @@ class CalibrationInvalidSensor : public binary_sensor::BinarySensor, public Comp
  * Select entity for runtime calibration algorithm selection.
  * Allows changing the calibration type from Home Assistant.
  * Changing algorithm triggers validation of existing points.
+ * Options are per-channel (dfrobot_orp is ORP-only); must match
+ * algorithm_select_options() in Python codegen.
  */
 class CalibrationAlgorithmSelect : public select::Select, public Component {
  public:

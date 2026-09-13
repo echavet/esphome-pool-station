@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Unit tests for algorithm select option registration (v0.7.12).
+"""Unit tests for per-channel algorithm select options (v0.7.13).
 
-Reproduces the live HA bug: select.register_select(..., options=[]) advertises
-an empty list, so entities stay `unknown` with `options: []`.
+v0.7.12 registered one shared list including dfrobot_orp on every channel,
+so HA showed dfrobot_orp on pH and pressure. Options must be per-channel.
 
-This module is free of esphome imports. It checks the shared option list and
+This module is free of esphome imports. It checks the shared option lists and
 asserts codegen / C++ stay aligned.
 
 Run with: python3 tests/test_algorithm_select_options.py
@@ -36,13 +36,14 @@ def _load_helper():
 
 helper = _load_helper()
 
-EXPECTED_OPTIONS = (
+EXPECTED_GENERIC = (
     "none",
     "linear",
     "polynomial",
     "piecewise",
-    "dfrobot_orp",
 )
+EXPECTED_ORP = EXPECTED_GENERIC + ("dfrobot_orp",)
+UNIMPLEMENTED = ("exponential", "logarithmic", "power")
 
 
 def _algorithm_select_codegen_block(source):
@@ -77,14 +78,64 @@ def _register_select_options_ast(source):
     return found
 
 
+def _cpp_setup_set_options(source):
+    """Return (orp_literals, generic_literals) from CalibrationAlgorithmSelect::setup()."""
+    setup_match = re.search(
+        r"void CalibrationAlgorithmSelect::setup\(\)\s*\{(?P<body>.*?)^\}",
+        source,
+        re.DOTALL | re.MULTILINE,
+    )
+    if setup_match is None:
+        raise AssertionError("CalibrationAlgorithmSelect::setup() not found")
+    body = setup_match.group("body")
+    orp_match = re.search(
+        r"channel_type_\s*==\s*CHANNEL_TYPE_ORP\s*\{[^}]*set_options\(\{(?P<opts>[^}]+)\}\)",
+        body,
+        re.DOTALL,
+    )
+    else_match = re.search(
+        r"else\s*\{[^}]*set_options\(\{(?P<opts>[^}]+)\}\)",
+        body,
+        re.DOTALL,
+    )
+    if orp_match is None or else_match is None:
+        raise AssertionError(
+            "C++ setup() must branch on CHANNEL_TYPE_ORP with two set_options lists"
+        )
+    orp_literals = tuple(re.findall(r'"([^"]+)"', orp_match.group("opts")))
+    generic_literals = tuple(re.findall(r'"([^"]+)"', else_match.group("opts")))
+    return orp_literals, generic_literals
+
+
 class AlgorithmSelectOptionsTest(unittest.TestCase):
-    def test_shared_options_are_nonempty_implemented_types(self):
-        options = helper.ALGORITHM_SELECT_OPTIONS
-        self.assertTrue(options, "algorithm select options must not be empty")
-        self.assertEqual(options, EXPECTED_OPTIONS)
-        self.assertNotIn("exponential", options)
-        self.assertNotIn("logarithmic", options)
-        self.assertNotIn("power", options)
+    def test_pressure_and_ph_exclude_dfrobot_orp(self):
+        for channel_type in (
+            helper.CHANNEL_TYPE_PRESSURE,
+            helper.CHANNEL_TYPE_PH,
+        ):
+            options = helper.algorithm_select_options(channel_type)
+            self.assertTrue(options, "algorithm select options must not be empty")
+            self.assertEqual(options, EXPECTED_GENERIC)
+            self.assertNotIn("dfrobot_orp", options)
+            for name in UNIMPLEMENTED:
+                self.assertNotIn(name, options)
+
+    def test_orp_includes_dfrobot_orp(self):
+        options = helper.algorithm_select_options(helper.CHANNEL_TYPE_ORP)
+        self.assertTrue(options, "ORP algorithm select options must not be empty")
+        self.assertEqual(options, EXPECTED_ORP)
+        self.assertIn("dfrobot_orp", options)
+        # CalibrationEngine also implements linear/polynomial/piecewise for ORP
+        for name in EXPECTED_GENERIC:
+            self.assertIn(name, options)
+        for name in UNIMPLEMENTED:
+            self.assertNotIn(name, options)
+
+    def test_named_tuples_match_function(self):
+        self.assertEqual(helper.ALGORITHM_SELECT_OPTIONS_GENERIC, EXPECTED_GENERIC)
+        self.assertEqual(helper.ALGORITHM_SELECT_OPTIONS_ORP, EXPECTED_ORP)
+        self.assertNotIn("dfrobot_orp", helper.ALGORITHM_SELECT_OPTIONS_GENERIC)
+        self.assertIn("dfrobot_orp", helper.ALGORITHM_SELECT_OPTIONS_ORP)
 
     def test_codegen_does_not_register_empty_options(self):
         with open(INIT_PATH, encoding="utf-8") as handle:
@@ -92,7 +143,8 @@ class AlgorithmSelectOptionsTest(unittest.TestCase):
         block = _algorithm_select_codegen_block(source)
         compact = block.replace(" ", "")
         self.assertNotIn("options=[]", compact)
-        self.assertIn("ALGORITHM_SELECT_OPTIONS", block)
+        self.assertIn("algorithm_select_options", block)
+        self.assertIn("algorithm_select_options(channel_type)", block)
         self.assertIn("await cg.register_component(", block)
         # Parent/channel must be set before register_component in this block
         parent_at = block.find("set_parent(")
@@ -107,7 +159,7 @@ class AlgorithmSelectOptionsTest(unittest.TestCase):
         options_args = _register_select_options_ast(source)
         self.assertTrue(options_args, "register_select options= not found")
         self.assertTrue(
-            any("ALGORITHM_SELECT_OPTIONS" in arg for arg in options_args),
+            any("algorithm_select_options" in arg for arg in options_args),
             options_args,
         )
         self.assertFalse(
@@ -120,16 +172,14 @@ class AlgorithmSelectOptionsTest(unittest.TestCase):
             source = handle.read()
         self.assertEqual(source.count("register_select("), 1)
 
-    def test_cpp_set_options_matches_shared_list(self):
+    def test_cpp_set_options_are_channel_aware(self):
         with open(CPP_PATH, encoding="utf-8") as handle:
             source = handle.read()
-        match = re.search(
-            r"this->traits\.set_options\(\{([^}]+)\}\)",
-            source,
-        )
-        self.assertIsNotNone(match, "C++ set_options initializer not found")
-        literals = re.findall(r'"([^"]+)"', match.group(1))
-        self.assertEqual(tuple(literals), helper.ALGORITHM_SELECT_OPTIONS)
+        orp_literals, generic_literals = _cpp_setup_set_options(source)
+        self.assertEqual(orp_literals, helper.ALGORITHM_SELECT_OPTIONS_ORP)
+        self.assertEqual(generic_literals, helper.ALGORITHM_SELECT_OPTIONS_GENERIC)
+        self.assertIn("dfrobot_orp", orp_literals)
+        self.assertNotIn("dfrobot_orp", generic_literals)
 
     def test_cpp_falls_back_when_option_missing(self):
         with open(CPP_PATH, encoding="utf-8") as handle:

@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.12 (Lot 7 — Fix algorithm select empty options in Home Assistant)  
+> Version: 0.7.13 (Lot 7 — Per-channel algorithm select options)  
 > Date: 2026-09-13  
 > Auteur: @echavet
 
@@ -44,7 +44,7 @@
 | ID | Exigence | Lot |
 |----|----------|-----|
 | F-CAL-01 | Points de calibration libres (1 à N points) | 2 |
-| F-CAL-02 | Algorithmes : linear, polynomial, piecewise, dfrobot_orp (exponential, logarithmic, power: **non implémentés**) | 2 |
+| F-CAL-02 | Algorithmes : linear, polynomial, piecewise ; dfrobot_orp **ORP only** (exponential, logarithmic, power: **non implémentés**) | 2 |
 | F-CAL-03 | Interface Capturer pour saisie guidée | 2 |
 | F-CAL-04 | Persistance preferences (flash) | 2 |
 | F-CAL-05 | Draft/commit workflow (SHOULD) | 2 |
