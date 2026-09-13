@@ -152,8 +152,8 @@
 
 | Lot | Contenu | Status |
 |-----|---------|--------|
-| **0** | Squelette, docs, sensor stub | ✅ Current |
-| 1 | ADS1115 binding, raw values, cal mode switch | Planned |
+| 0 | Squelette, docs, sensor stub | ✅ Done |
+| **1** | ADS1115 binding, raw values, cal mode switch | ✅ Current |
 | 2 | N-point calibration, Capturer, persistence | Planned |
 | 3 | Filters (j5-like) | Planned |
 | 4 | Diagnostics (noise, jumps, drift) | Planned |

@@ -1,11 +1,14 @@
-# Pool Station — Minimal Example Configuration
+# Pool Station — Minimal Example Configuration (Lot 1)
 # 
-# This is a future-facing configuration showing the intended structure.
-# Lot 0 only provides the skeleton; actual sensor binding comes in Lot 1+.
+# This configuration demonstrates the Lot 1 features:
+#   - Real ADS1115-backed channels (pressure, pH, ORP)
+#   - Raw voltage exposure as diagnostic sensors
+#   - Calibration mode switch for high-frequency sampling
 #
-# Hardware reference:
-#   - ESP32-S3 (pool-firmata-wifi)
-#   - ADS1115 on I2C (0x48): A0=pressure, A2=pH, A3=ORP
+# Hardware reference (Eric prod):
+#   - DIYables ESP32-S3 UNO
+#   - I2C: SDA=GPIO5, SCL=GPIO4
+#   - ADS1115 @0x48: A0=pressure, A2=pH, A3=ORP
 #   - Dallas DS18B20: water (GPIO17), air sensors (GPIO13)
 #
 # See docs/SENSOR-IDENTITY.md for address binding rules.
@@ -21,7 +24,7 @@ esp32:
 
 # External component from GitHub
 external_components:
-  - source: github://echavet/esphome-pool-station
+  - source: github://echavet/esphome-pool-station@main
     components: [pool_station]
     refresh: 1d
 
@@ -47,36 +50,85 @@ ota:
 
 # =============================================================================
 # I2C Bus for ADS1115
+# Hardware: DIYables ESP32-S3 UNO pinout
 # =============================================================================
 i2c:
-  sda: GPIO21
-  scl: GPIO22
+  sda: GPIO5
+  scl: GPIO4
   scan: true
 
 # =============================================================================
 # ADS1115 ADC (native ESPHome component)
+# Address 0x48 (ADDR pin to GND)
 # =============================================================================
 ads1115:
   - address: 0x48
     id: ads
+    continuous_mode: false
 
 # =============================================================================
 # Dallas 1-Wire buses
 # =============================================================================
-dallas:
-  - pin: GPIO17
-    id: dallas_water
-  - pin: GPIO13
-    id: dallas_air
+one_wire:
+  - platform: gpio
+    pin: GPIO17
+    id: onewire_water
+  - platform: gpio  
+    pin: GPIO13
+    id: onewire_air
 
 # =============================================================================
-# Temperature Sensors — ADDRESS-BOUND (see SENSOR-IDENTITY.md)
+# ADS1115 Source Sensors
+# These are the RAW ADC readings that pool_station channels consume.
+# Gain 4.096 gives ±4.096V range (resolution ~0.125mV)
 # =============================================================================
 sensor:
+  # ---------------------------------------------------------------------------
+  # Pressure sensor source — A0
+  # Typical sensor: 0-5V output for 0-10 bar (via isolation module)
+  # ---------------------------------------------------------------------------
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A0_GND'
+    gain: 4.096
+    id: ads_pressure
+    name: "ADS Pressure Source"
+    internal: true
+    update_interval: 1s
+
+  # ---------------------------------------------------------------------------
+  # pH sensor source — A2
+  # Typical pH probe module: 0-3V output
+  # ---------------------------------------------------------------------------
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A2_GND'
+    gain: 4.096
+    id: ads_ph
+    name: "ADS pH Source"
+    internal: true
+    update_interval: 1s
+
+  # ---------------------------------------------------------------------------
+  # ORP sensor source — A3
+  # Typical ORP probe module: 0-3V output
+  # ---------------------------------------------------------------------------
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A3_GND'
+    gain: 4.096
+    id: ads_orp
+    name: "ADS ORP Source"
+    internal: true
+    update_interval: 1s
+
+  # ---------------------------------------------------------------------------
+  # Temperature Sensors — ADDRESS-BOUND (see SENSOR-IDENTITY.md)
+  # ---------------------------------------------------------------------------
   # Water temperature — immersed probe
   # IMPORTANT: Use YOUR actual ROM address, not this placeholder
-  - platform: dallas
-    dallas_id: dallas_water
+  - platform: dallas_temp
+    one_wire_id: onewire_water
     address: 0xc80200000000xxxx  # Replace with actual address
     name: "Water Temperature"
     id: water_temp
@@ -84,125 +136,99 @@ sensor:
     accuracy_decimals: 2
 
   # Air temperature — pump enclosure
-  - platform: dallas
-    dallas_id: dallas_air
+  - platform: dallas_temp
+    one_wire_id: onewire_air
     address: 0x70010000000000xx  # Replace with actual address
     name: "Air Temperature (Pump)"
     id: air_pump_temp
 
   # Air temperature — local ambient
-  - platform: dallas
-    dallas_id: dallas_air
+  - platform: dallas_temp
+    one_wire_id: onewire_air
     address: 0x44010000000000xx  # Replace with actual address
     name: "Air Temperature (Local)"
     id: air_local_temp
 
-  # ---------------------------------------------------------------------------
-  # ADS1115 Raw Channels (future Lot 1+)
-  # ---------------------------------------------------------------------------
-  # Pressure sensor — A0
-  - platform: ads1115
-    ads1115_id: ads
-    multiplexer: 'A0_GND'
-    gain: 4.096
-    name: "Pressure Raw"
-    id: pressure_raw_mv
-    unit_of_measurement: "mV"
-    update_interval: 2s
-    # TODO Lot 1: bind to pool_station for calibration
-
-  # pH sensor — A2
-  - platform: ads1115
-    ads1115_id: ads
-    multiplexer: 'A2_GND'
-    gain: 4.096
-    name: "pH Raw"
-    id: ph_raw_mv
-    unit_of_measurement: "mV"
-    update_interval: 1s
-    # TODO Lot 1: bind to pool_station for calibration
-
-  # ORP sensor — A3
-  - platform: ads1115
-    ads1115_id: ads
-    multiplexer: 'A3_GND'
-    gain: 4.096
-    name: "ORP Raw"
-    id: orp_raw_mv
-    unit_of_measurement: "mV"
-    update_interval: 1s
-    # TODO Lot 1: bind to pool_station for calibration
-
 # =============================================================================
-# Pool Station Component (Lot 0: skeleton only)
+# Pool Station Component (Lot 1)
 # =============================================================================
 pool_station:
   id: pool
-  update_interval: 1s
+  update_interval: 5s
+  calibration_interval: 1s
   
-  # Calibration configuration (stub — actual impl in Lot 2)
-  calibration:
-    mode: none  # Options: none, linear, polynomial, exponential, logarithmic, power, piecewise, dfrobot_orp
-    # points:   # Lot 2+: calibration points
-    #   - raw: 2048
-    #     reference: 7.0
-    #   - raw: 1800
-    #     reference: 4.0
+  # Calibration Mode Switch
+  # When ON: all channels sample at calibration_interval (1s)
+  # When OFF: channels use their configured update_interval
+  calibration_mode:
+    name: "Pool Calibration Mode"
+    id: cal_mode_switch
 
-  # Water temperature for compensation (stub — actual impl in Lot 5)
+  # Channels - compose native ADS1115 sensors
+  channels:
+    # Pressure channel
+    pressure:
+      source_id: ads_pressure
+      name: "Filter Pressure"
+      unit_of_measurement: "bar"
+      accuracy_decimals: 2
+      icon: "mdi:gauge"
+      update_interval: 2s
+      # Raw voltage diagnostic sensor (always exposed)
+      raw_sensor:
+        name: "Filter Pressure Raw"
+        # Defaults: V, 3 decimals, diagnostic category
+
+    # pH channel
+    ph:
+      source_id: ads_ph
+      name: "Pool pH"
+      unit_of_measurement: "pH"
+      accuracy_decimals: 2
+      icon: "mdi:ph"
+      update_interval: 60s
+      raw_sensor:
+        name: "Pool pH Raw"
+
+    # ORP channel
+    orp:
+      source_id: ads_orp
+      name: "Pool ORP"
+      unit_of_measurement: "mV"
+      accuracy_decimals: 0
+      icon: "mdi:flash"
+      update_interval: 60s
+      raw_sensor:
+        name: "Pool ORP Raw"
+
+  # Water temperature for future Tw compensation (Lot 5)
   water_temperature:
     sensor_id: water_temp
 
 # =============================================================================
-# Pool Station Sensors (Lot 0: stub, actual binding in Lot 1+)
+# Notes for Lot 1
 # =============================================================================
-# Uncomment when Lot 1 is implemented:
-
-# sensor:
-#   - platform: pool_station
-#     pool_station_id: pool
-#     role: water_temperature
-#     name: "Pool Water (Calibrated)"
+# 
+# WHAT'S REAL:
+#   - ADS1115 source sensors read actual ADC values
+#   - Channels subscribe to source sensors and publish values
+#   - Raw voltage diagnostic sensors always expose true ADC readings
+#   - Calibration mode switch controls sampling frequency
+#   - Temperature sensors use explicit Dallas addresses (anti-swap)
 #
-#   - platform: pool_station
-#     pool_station_id: pool
-#     role: ph_calibrated
-#     name: "Pool pH"
+# WHAT'S STUB (coming in later lots):
+#   - Calibration: currently pass-through (Lot 2 adds N-point algorithms)
+#   - ORP: converts V to mV but no real calibration
+#   - Pressure: pass-through voltage (needs formula configuration)
+#   - pH: pass-through voltage (needs N-point calibration)
+#   - Filters: no filtering applied (Lot 3)
+#   - Diagnostics: no noise/drift detection (Lot 4)
+#   - Temperature compensation: binding present but not used (Lot 5)
 #
-#   - platform: pool_station
-#     pool_station_id: pool
-#     role: orp_calibrated
-#     name: "Pool ORP"
+# CALIBRATION MODE:
+#   Turn ON the "Pool Calibration Mode" switch when:
+#   - Performing pH/ORP calibration with reference solutions
+#   - Checking pressure sensor response
+#   This forces 1s sampling on all channels for responsive readings.
 #
-#   - platform: pool_station
-#     pool_station_id: pool
-#     role: pressure_calibrated
-#     name: "Pool Filter Pressure"
-
 # =============================================================================
-# Future Lots — Placeholders
-# =============================================================================
-
-# Lot 3: Filters
-# filter_config:
-#   filter_samples: 5
-#   max_jump: 0.5
-#   streak: 3
-#   min: 0.0
-#   max: 14.0
-
-# Lot 4: Diagnostics
-# diagnostics:
-#   noise_threshold: 0.1
-#   jump_threshold: 0.5
-#   drift_window: 3600
-
-# Lot 6: Gates/Campaigns
-# campaigns:
-#   - name: "Filtration OFF pH"
-#     prepare:
-#       switch_id: filtration_pump
-#       state: OFF
-#     delay: 60s
-#     burst_samples: 10
-#     restore: true

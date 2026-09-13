@@ -3,8 +3,10 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/switch/switch.h"
 #include <vector>
 #include <map>
+#include <functional>
 
 namespace esphome {
 namespace pool_station {
@@ -12,7 +14,17 @@ namespace pool_station {
 static const char *const TAG = "pool_station";
 
 /**
- * Sensor role identifiers.
+ * Channel types for ADS1115-backed sensors.
+ * Must match Python CHANNEL_TYPE_* constants in __init__.py
+ */
+enum ChannelType : uint8_t {
+  CHANNEL_TYPE_PRESSURE = 0,
+  CHANNEL_TYPE_PH = 1,
+  CHANNEL_TYPE_ORP = 2,
+};
+
+/**
+ * Legacy sensor role identifiers (Lot 0 compatibility).
  * Must match Python SENSOR_ROLE dict in sensor.py
  * 
  * IMPORTANT: Anti-swap rule - sensor roles are bound to physical addresses,
@@ -31,8 +43,7 @@ enum SensorRole : uint8_t {
 };
 
 /**
- * Calibration algorithm modes.
- * Lot 0: stub only, actual implementation in Lot 2.
+ * Calibration algorithm modes (for future Lot 2).
  */
 enum CalibrationMode : uint8_t {
   CAL_MODE_NONE = 0,
@@ -42,78 +53,149 @@ enum CalibrationMode : uint8_t {
   CAL_MODE_LOGARITHMIC = 4,
   CAL_MODE_POWER = 5,
   CAL_MODE_PIECEWISE = 6,
-  CAL_MODE_DFROBOT_ORP = 7,  // SEN0165-like mid/offset
+  CAL_MODE_DFROBOT_ORP = 7,
 };
 
-// Forward declaration
+// Forward declarations
+class PoolStationComponent;
 class PoolStationSensor;
+class PoolStationChannelSensor;
+class CalibrationModeSwitch;
 
 /**
  * Main pool_station component.
  * 
  * Orchestrates sensor readings, calibration, and diagnostics.
- * Lot 0: skeleton with stub functionality.
+ * Lot 1: Real ADS1115 channel binding with raw values exposure.
  * 
  * Design principles:
  * - Composes ESPHome ads1115/dallas/gpio — does NOT reimplement drivers
- * - Rich N-point calibration with multiple algorithm support
- * - Diagnostics: noise, jumps, drift detection
- * - Gated/campaign sampling for accurate measurements
- * - Water temperature compensation for pH/ORP
- * - Stable entity IDs (anti-swap, see SENSOR-IDENTITY.md)
+ * - Channels listen to source sensors and publish transformed values
+ * - Calibration mode switch enables fast update intervals
  */
-class PoolStationComponent : public Component {
+class PoolStationComponent : public PollingComponent {
  public:
   PoolStationComponent() = default;
 
   void setup() override;
-  void loop() override;
+  void update() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
 
-  // Configuration setters (called by codegen)
-  void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
-  void set_calibration_mode(uint8_t mode) { this->calibration_mode_ = static_cast<CalibrationMode>(mode); }
+  // Configuration setters
+  void set_calibration_interval(uint32_t interval_ms) { this->calibration_interval_ = interval_ms; }
   void set_water_temperature_sensor(sensor::Sensor *sensor) { this->water_temp_sensor_ = sensor; }
+  void set_calibration_mode_switch(CalibrationModeSwitch *sw);
 
-  // Sensor registration
+  // Channel registration
+  void register_channel(PoolStationChannelSensor *channel, uint8_t type);
+
+  // Legacy sensor registration (Lot 0 compatibility)
   void register_sensor(PoolStationSensor *sensor, uint8_t role);
 
-  // Accessors for sensors
+  // Accessors
   float get_water_temperature() const;
   bool has_water_temperature() const { return this->water_temp_sensor_ != nullptr; }
+  bool is_calibration_mode() const { return this->calibration_mode_active_; }
+  uint32_t get_calibration_interval() const { return this->calibration_interval_; }
 
-  // Calibration stubs (Lot 2+)
-  // TODO: float apply_calibration(float raw_value, SensorRole role);
-  // TODO: void start_calibration_capture(SensorRole role, float reference_value);
-  // TODO: void commit_calibration(SensorRole role);
-
-  // Diagnostics stubs (Lot 4+)
-  // TODO: DiagnosticFlags get_diagnostics(SensorRole role);
-
-  // Gate/Campaign stubs (Lot 6+)
-  // TODO: void start_measurement_campaign(CampaignConfig config);
+  // Called by calibration switch
+  void set_calibration_mode_active(bool active);
 
  protected:
-  uint32_t update_interval_{1000};
-  uint32_t last_update_{0};
-  CalibrationMode calibration_mode_{CAL_MODE_NONE};
+  uint32_t calibration_interval_{1000};
+  bool calibration_mode_active_{false};
+  
+  // Calibration mode switch
+  CalibrationModeSwitch *calibration_mode_switch_{nullptr};
 
-  // External sensor bindings (composes ESPHome sensors)
+  // External sensor bindings
   sensor::Sensor *water_temp_sensor_{nullptr};
 
-  // Registered pool_station sensors by role
-  std::map<uint8_t, PoolStationSensor *> sensors_;
+  // Registered channels
+  std::map<uint8_t, PoolStationChannelSensor *> channels_;
 
-  // Stub: simulate sensor update cycle
-  void update_sensors_();
+  // Legacy registered sensors (Lot 0)
+  std::map<uint8_t, PoolStationSensor *> sensors_;
 };
 
+
 /**
- * Pool Station Sensor.
+ * Calibration Mode Switch.
+ * 
+ * When ON, forces short update intervals on all channels for calibration.
+ * When OFF, uses configured intervals.
+ */
+class CalibrationModeSwitch : public switch_::Switch, public Component {
+ public:
+  CalibrationModeSwitch() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+
+ protected:
+  void write_state(bool state) override;
+
+  PoolStationComponent *parent_{nullptr};
+};
+
+
+/**
+ * Pool Station Channel Sensor.
+ * 
+ * Wraps an ADS1115 source sensor and provides:
+ * - Raw voltage exposure (diagnostic sensor)
+ * - Calibrated value (stub pass-through for Lot 1)
+ * - Calibration mode interval switching
+ */
+class PoolStationChannelSensor : public sensor::Sensor, public Component {
+ public:
+  PoolStationChannelSensor() = default;
+
+  void setup() override;
+  void loop() override;
+  void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::DATA - 1.0f; }
+
+  // Configuration setters
+  void set_channel_type(uint8_t type) { this->channel_type_ = static_cast<ChannelType>(type); }
+  void set_source_sensor(sensor::Sensor *sensor) { this->source_sensor_ = sensor; }
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_raw_sensor(sensor::Sensor *sensor) { this->raw_sensor_ = sensor; }
+  void set_update_interval(uint32_t interval_ms) { this->configured_interval_ = interval_ms; }
+
+  // Accessors
+  ChannelType get_channel_type() const { return this->channel_type_; }
+  const char *get_channel_type_name() const;
+  float get_raw_value() const { return this->last_raw_value_; }
+
+ protected:
+  void on_source_value_(float value);
+  float apply_calibration_(float raw_voltage);
+
+  ChannelType channel_type_{CHANNEL_TYPE_PRESSURE};
+  PoolStationComponent *parent_{nullptr};
+  sensor::Sensor *source_sensor_{nullptr};
+  sensor::Sensor *raw_sensor_{nullptr};
+  
+  uint32_t configured_interval_{1000};
+  uint32_t last_update_{0};
+  
+  float last_raw_value_{NAN};
+  float last_calibrated_value_{NAN};
+  
+  // Callback ID for source sensor subscription
+  optional<CallbackManager<void(float)>::CancelToken> source_callback_;
+};
+
+
+/**
+ * Legacy Pool Station Sensor (Lot 0 compatibility).
  * 
  * A sensor that is managed by PoolStationComponent.
- * Supports calibration, filtering, and diagnostics (stubs in Lot 0).
+ * Supports calibration, filtering, and diagnostics (stubs in Lot 0/1).
  */
 class PoolStationSensor : public sensor::Sensor, public Component {
  public:
@@ -133,16 +215,10 @@ class PoolStationSensor : public sensor::Sensor, public Component {
   // Called by parent component to publish value
   void publish_value(float value);
 
-  // Calibration state (Lot 2+)
-  // TODO: bool is_calibration_valid() const;
-  // TODO: float get_raw_value() const;
-  // TODO: float get_calibrated_value() const;
-
  protected:
   SensorRole role_{ROLE_WATER_TEMPERATURE};
   PoolStationComponent *parent_{nullptr};
   
-  // Last raw/calibrated values (for diagnostics)
   float last_raw_value_{NAN};
   float last_calibrated_value_{NAN};
 };
