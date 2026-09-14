@@ -63,6 +63,7 @@ void CalibrationPointXNumber::control(float value) {
   
   engine->set_point(this->point_index_, value, y_value);
   this->publish_state(value);
+  channel->notify_calibration_updated();
   
   ESP_LOGI(TAG, "Set calibration point %d X=%.4f for channel %d", 
            this->point_index_, value, this->channel_type_);
@@ -124,6 +125,7 @@ void CalibrationPointYNumber::control(float value) {
   
   engine->set_point(this->point_index_, x_value, value);
   this->publish_state(value);
+  channel->notify_calibration_updated();
   
   ESP_LOGI(TAG, "Set calibration point %d Y=%.4f for channel %d", 
            this->point_index_, value, this->channel_type_);
@@ -169,6 +171,7 @@ void DFRobotMidNumber::control(float value) {
   
   engine->set_dfrobot_mid_mv(value);
   this->publish_state(value);
+  channel->notify_calibration_updated();
   
   ESP_LOGI(TAG, "Set DFRobot mid_mv=%.1f for channel %d", value, this->channel_type_);
 }
@@ -213,6 +216,7 @@ void DFRobotOffsetNumber::control(float value) {
   
   engine->set_dfrobot_offset_mv(value);
   this->publish_state(value);
+  channel->notify_calibration_updated();
   
   ESP_LOGI(TAG, "Set DFRobot offset_mv=%.1f for channel %d", value, this->channel_type_);
 }
@@ -302,7 +306,14 @@ void CalibrationSaveButton::press_action() {
              water_temp, this->channel_type_);
   }
   
-  engine->save_to_preferences();
+  // draft_mode: Save = commit draft → live + flash + clear dirty.
+  // Legacy: persist the already-live set.
+  if (engine->is_draft_mode()) {
+    engine->commit_draft();
+    ESP_LOGI(TAG, "Save committed draft calibration for channel %d", this->channel_type_);
+  } else {
+    engine->save_to_preferences();
+  }
   
   // Update calibration temp sensor if configured
   channel->publish_calibration_temperature();
@@ -341,8 +352,10 @@ void CalibrationInvalidSensor::update_from_calibration() {
   
   if (changed) {
     if (is_invalid) {
-      ESP_LOGW(TAG, "Channel %d calibration is INVALID (need %d points, have %zu)",
-               this->channel_type_, engine->get_minimum_points(), engine->get_point_count());
+      ESP_LOGW(TAG, "Channel %d calibration is INVALID (need %d live points, have %zu)",
+               this->channel_type_,
+               engine->get_minimum_points_for_type(engine->get_live_type()),
+               engine->get_live_point_count());
     } else {
       ESP_LOGI(TAG, "Channel %d calibration is valid", this->channel_type_);
     }

@@ -1,7 +1,7 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.16 (Lot 7 — Lot-2 review-fix ports: stable NVS key, slot-stable points)  
-> Date: 2026-09-13  
+> Version: 0.7.17 (Lot 7 — draft/Save dirty UX: Save=commit, live stays last saved)  
+> Date: 2026-09-14  
 > Auteur: @echavet
 
 ## 1. Vision
@@ -47,7 +47,7 @@
 | F-CAL-02 | Algorithmes : linear, polynomial, piecewise ; dfrobot_orp **ORP only** (exponential, logarithmic, power: **non implémentés**) | 2 |
 | F-CAL-03 | Interface Capturer pour saisie guidée | 2 |
 | F-CAL-04 | Persistance preferences (flash) | 2 |
-| F-CAL-05 | Draft/commit workflow (SHOULD) | 2 |
+| F-CAL-05 | Draft/Save workflow (Save=commit, Discard, draft_pending) | 2 |
 | F-CAL-06 | Indicateur `cal_invalid` si calibration périmée/absente | 2 |
 | F-CAL-07 | dfrobot_orp : mode mid/offset SEN0165-like | 2 |
 
@@ -123,7 +123,7 @@
 | F-HA-03 | Services calibration (via UI) | 7 | ✅ Done |
 | F-HA-04 | Notifications calibration périmée (cal_invalid) | 7 | ✅ Done |
 | F-HA-05 | Runtime algorithm selection | 7 | ✅ Done |
-| F-HA-06 | Draft/Commit workflow | 7 | ✅ Done |
+| F-HA-06 | Draft/Save workflow (Save=commit, Discard, draft_pending) | 7 | ✅ Done |
 | F-HA-07 | Add/remove calibration points | 7 | ✅ Done |
 
 ## 4. Exigences non-fonctionnelles
@@ -172,7 +172,7 @@
 | 4 | Diagnostics (noise σ/ptp, stuck, flags) | ✅ Done |
 | 5 | Water temp compensation (Tw) | ✅ Done |
 | 6 | Gates/campaigns | Planned |
-| **7** | **HA polish, runtime algo select, draft/commit** | ✅ **Current** |
+| **7** | **HA polish, runtime algo select, draft/Save dirty UX** | ✅ **Current** |
 | 8 | (Optionnel) Interference detection, EZO | Future |
 
 ## 8. Critères d'acceptation

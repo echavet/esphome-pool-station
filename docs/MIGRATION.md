@@ -8,6 +8,7 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 - [From pool-firmata-wifi (lambda-heavy) to pool_station](#from-pool-firmata-wifi-to-pool_station)
 - [Entity ID Stability](#entity-id-stability)
 - [Calibration NVS key (v0.7.16)](#calibration-nvs-key-v0716)
+- [Capturer draft / Save (v0.7.17)](#capturer-draft-save-v0717)
 - [SENSOR-IDENTITY Checklist Before OTA](#sensor-identity-checklist-before-ota)
 
 ---
@@ -211,6 +212,48 @@ migration is possible.
 
 Keep `pool_station.id` stable. Changing the component id still generates a
 new key and orphans saved calibration.
+
+---
+
+## Capturer draft / Save (v0.7.17)
+
+Through v0.7.16, Eric-style YAML with `draft_mode: false` applied Point Count /
+Add / Remove / Capture to `live_points_` immediately. The Save button only
+wrote that already-live set to flash. A Home Assistant page refresh does
+**not** reload the ESP, so there was no undo.
+
+v0.7.17 makes **draft + Save** the supported Capturer path for multi-point
+channels:
+
+| Action | Effect |
+|--------|--------|
+| Edit points / count / capture / algorithm | Draft only (`draft_pending` ON) |
+| Live published reading | Last **committed / saved** calibration |
+| **Save** | `commit_draft()` → live + flash + clear dirty |
+| **Discard / Annuler** | Revert draft to live, clear dirty |
+
+Enable in YAML (keep the existing Save button):
+
+```yaml
+capturer:
+  point_count: 5
+  save_button: true
+  point_count_number:
+    name: "pH Point Count"
+  draft_mode: true
+  discard_button:
+    name: "pH Discard Changes"
+  draft_pending:
+    name: "pH Draft Pending"
+```
+
+`commit_button` is optional and does the same as Save when `draft_mode` is
+on. Prefer a single Save button.
+
+`draft_mode: false` remains the legacy immediate-apply path.
+
+Lovelace note: dashboard wording such as "V croissant" means volts on the
+raw X axis; that label is a dashboard concern, not this firmware change.
 
 ---
 

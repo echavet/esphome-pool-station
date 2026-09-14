@@ -13,6 +13,7 @@ const char *CalibrationEngine::get_type_name() const {
 
 void CalibrationEngine::set_type(CalibrationType type) {
   this->type_ = type;
+  this->live_type_ = type;
   this->poly_coeffs_valid_ = false;
 }
 
@@ -23,13 +24,37 @@ void CalibrationEngine::set_type_runtime(CalibrationType type) {
   
   CalibrationType old_type = this->type_;
   this->type_ = type;
-  this->poly_coeffs_valid_ = false;
+  if (this->draft_mode_enabled_) {
+    this->mark_draft_dirty_();
+  } else {
+    this->live_type_ = type;
+    this->poly_coeffs_valid_ = false;
+  }
   
-  ESP_LOGI(CAL_TAG, "Calibration algorithm changed: %s -> %s", 
-           calibration_type_name(old_type), calibration_type_name(type));
+  ESP_LOGI(CAL_TAG, "Calibration algorithm changed: %s -> %s%s", 
+           calibration_type_name(old_type), calibration_type_name(type),
+           this->draft_mode_enabled_ ? " [DRAFT]" : "");
   
-  // Revalidate and notify
+  // Revalidate published state (live) and notify
   this->notify_validation_changed_();
+}
+
+void CalibrationEngine::set_dfrobot_mid_mv(float mid) {
+  this->dfrobot_mid_mv_ = mid;
+  if (this->draft_mode_enabled_) {
+    this->mark_draft_dirty_();
+  } else {
+    this->live_dfrobot_mid_mv_ = mid;
+  }
+}
+
+void CalibrationEngine::set_dfrobot_offset_mv(float offset) {
+  this->dfrobot_offset_mv_ = offset;
+  if (this->draft_mode_enabled_) {
+    this->mark_draft_dirty_();
+  } else {
+    this->live_dfrobot_offset_mv_ = offset;
+  }
 }
 
 void CalibrationEngine::notify_validation_changed_() {
@@ -37,6 +62,18 @@ void CalibrationEngine::notify_validation_changed_() {
     bool valid = this->is_valid();
     this->validation_callback_(valid);
   }
+}
+
+void CalibrationEngine::mark_draft_dirty_() {
+  if (this->draft_mode_enabled_) {
+    this->has_draft_changes_ = true;
+  }
+}
+
+void CalibrationEngine::commit_working_params_to_live_() {
+  this->live_type_ = this->type_;
+  this->live_dfrobot_mid_mv_ = this->dfrobot_mid_mv_;
+  this->live_dfrobot_offset_mv_ = this->dfrobot_offset_mv_;
 }
 
 // ============================================================================
@@ -58,9 +95,7 @@ void CalibrationEngine::add_point(float x, float y) {
   
   // Do not sort: HA Capturer entities map to slot indices.
   
-  if (this->draft_mode_enabled_) {
-    this->has_draft_changes_ = true;
-  }
+  this->mark_draft_dirty_();
   
   ESP_LOGD(CAL_TAG, "Added calibration point: x=%.4f, y=%.4f (total: %zu)%s", 
            x, y, points.size(), this->draft_mode_enabled_ ? " [DRAFT]" : "");
@@ -81,9 +116,7 @@ void CalibrationEngine::set_point(size_t index, float x, float y) {
   
   // Do not re-sort: keep HA slot indices stable.
   
-  if (this->draft_mode_enabled_) {
-    this->has_draft_changes_ = true;
-  }
+  this->mark_draft_dirty_();
   
   ESP_LOGD(CAL_TAG, "Updated calibration point %zu: x=%.4f, y=%.4f%s", 
            index, x, y, this->draft_mode_enabled_ ? " [DRAFT]" : "");
@@ -100,9 +133,7 @@ void CalibrationEngine::remove_point(size_t index) {
   points.erase(points.begin() + index);
   this->poly_coeffs_valid_ = false;
   
-  if (this->draft_mode_enabled_) {
-    this->has_draft_changes_ = true;
-  }
+  this->mark_draft_dirty_();
   
   ESP_LOGD(CAL_TAG, "Removed calibration point %zu (remaining: %zu)%s", 
            index, points.size(), this->draft_mode_enabled_ ? " [DRAFT]" : "");
@@ -115,9 +146,7 @@ void CalibrationEngine::clear_points() {
   points.clear();
   this->poly_coeffs_valid_ = false;
   
-  if (this->draft_mode_enabled_) {
-    this->has_draft_changes_ = true;
-  }
+  this->mark_draft_dirty_();
   
   ESP_LOGD(CAL_TAG, "Cleared all calibration points%s", 
            this->draft_mode_enabled_ ? " [DRAFT]" : "");
@@ -146,10 +175,8 @@ void CalibrationEngine::set_seed_points(const std::vector<CalibrationPoint> &poi
   this->live_points_ = points;
   this->poly_coeffs_valid_ = false;
   
-  // If draft mode is enabled, also copy to draft
   if (this->draft_mode_enabled_) {
-    this->draft_points_ = this->live_points_;
-    this->has_draft_changes_ = false;
+    this->sync_draft_from_live();
   }
   
   ESP_LOGD(CAL_TAG, "Set %zu seed calibration points", this->live_points_.size());
@@ -159,15 +186,25 @@ void CalibrationEngine::set_seed_points(const std::vector<CalibrationPoint> &poi
 // Draft/Commit workflow (Lot 7)
 // ============================================================================
 
+void CalibrationEngine::sync_draft_from_live() {
+  this->draft_points_ = this->live_points_;
+  this->type_ = this->live_type_;
+  this->dfrobot_mid_mv_ = this->live_dfrobot_mid_mv_;
+  this->dfrobot_offset_mv_ = this->live_dfrobot_offset_mv_;
+  this->has_draft_changes_ = false;
+}
+
 void CalibrationEngine::enable_draft_mode() {
   if (this->draft_mode_enabled_) {
     return;
   }
   
-  // Copy live points to draft
-  this->draft_points_ = this->live_points_;
+  // Snapshot committed params, then copy live → draft
+  this->live_type_ = this->type_;
+  this->live_dfrobot_mid_mv_ = this->dfrobot_mid_mv_;
+  this->live_dfrobot_offset_mv_ = this->dfrobot_offset_mv_;
   this->draft_mode_enabled_ = true;
-  this->has_draft_changes_ = false;
+  this->sync_draft_from_live();
   
   ESP_LOGI(CAL_TAG, "Draft mode ENABLED (copied %zu live points to draft)", this->live_points_.size());
 }
@@ -177,15 +214,14 @@ void CalibrationEngine::disable_draft_mode() {
     return;
   }
   
-  this->draft_mode_enabled_ = false;
-  
   if (this->has_draft_changes_) {
     ESP_LOGW(CAL_TAG, "Draft mode DISABLED with uncommitted changes (discarded)");
-    this->has_draft_changes_ = false;
   } else {
     ESP_LOGI(CAL_TAG, "Draft mode DISABLED");
   }
   
+  this->sync_draft_from_live();
+  this->draft_mode_enabled_ = false;
   this->draft_points_.clear();
 }
 
@@ -195,12 +231,14 @@ void CalibrationEngine::commit_draft() {
     return;
   }
   
-  // Copy draft to live
+  // Copy draft points + working algo/params to live
   this->live_points_ = this->draft_points_;
+  this->commit_working_params_to_live_();
   this->has_draft_changes_ = false;
   this->poly_coeffs_valid_ = false;
   
-  ESP_LOGI(CAL_TAG, "Committed %zu draft points to live calibration", this->live_points_.size());
+  ESP_LOGI(CAL_TAG, "Committed %zu draft points to live calibration (type=%s)",
+           this->live_points_.size(), calibration_type_name(this->live_type_));
   
   // Save to preferences
   this->save_to_preferences();
@@ -214,9 +252,7 @@ void CalibrationEngine::discard_draft() {
     return;
   }
   
-  // Reset draft to match live
-  this->draft_points_ = this->live_points_;
-  this->has_draft_changes_ = false;
+  this->sync_draft_from_live();
   
   ESP_LOGI(CAL_TAG, "Discarded draft changes, reverted to %zu live points", this->live_points_.size());
   
@@ -265,65 +301,42 @@ bool CalibrationEngine::is_type_implemented(CalibrationType type) {
   }
 }
 
-bool CalibrationEngine::is_valid() const {
-  // Uses LIVE points for validation (actual calibration state)
-  if (!this->is_implemented()) {
+bool CalibrationEngine::is_points_valid_(const std::vector<CalibrationPoint> &points,
+                                         CalibrationType type) const {
+  if (!is_type_implemented(type)) {
     return false;
   }
 
-  if (this->type_ == CAL_TYPE_NONE) {
+  if (type == CAL_TYPE_NONE) {
     return false;
   }
-  
-  if (this->type_ == CAL_TYPE_DFROBOT_ORP) {
-    // DFRobot ORP is always valid (uses mid/offset params)
+
+  if (type == CAL_TYPE_DFROBOT_ORP) {
     return true;
   }
-  
-  // Check minimum points against live set
-  uint8_t min_pts = this->get_minimum_points();
-  if (this->live_points_.size() < min_pts) {
-    return false;
-  }
-  
-  // Check all live points are valid
-  for (const auto &pt : this->live_points_) {
-    if (!pt.is_valid()) {
-      return false;
-    }
-  }
-  
-  return true;
-}
 
-bool CalibrationEngine::is_draft_valid() const {
-  // Validates the draft set (for UI feedback)
-  if (!this->is_implemented()) {
-    return false;
-  }
-
-  if (this->type_ == CAL_TYPE_NONE) {
-    return false;
-  }
-  
-  if (this->type_ == CAL_TYPE_DFROBOT_ORP) {
-    return true;
-  }
-  
-  uint8_t min_pts = this->get_minimum_points();
-  const auto &points = this->draft_mode_enabled_ ? this->draft_points_ : this->live_points_;
-  
+  uint8_t min_pts = this->get_minimum_points_for_type(type);
   if (points.size() < min_pts) {
     return false;
   }
-  
+
   for (const auto &pt : points) {
     if (!pt.is_valid()) {
       return false;
     }
   }
-  
+
   return true;
+}
+
+bool CalibrationEngine::is_valid() const {
+  // Published validity: last committed type + live points
+  return this->is_points_valid_(this->live_points_, this->live_type_);
+}
+
+bool CalibrationEngine::is_draft_valid() const {
+  // Working set (draft when draft_mode is on) — for UI feedback
+  return this->is_points_valid_(this->points_(), this->type_);
 }
 
 float CalibrationEngine::apply_precision_(float value) const {
@@ -355,7 +368,8 @@ float CalibrationEngine::calibrate(float raw_voltage) const {
   }
 
   float result = raw_voltage;
-  switch (this->type_) {
+  // Published output always uses the last committed algorithm + live points.
+  switch (this->live_type_) {
     case CAL_TYPE_NONE:
       result = raw_voltage;  // Pass-through
       break;
@@ -597,7 +611,7 @@ float CalibrationEngine::calibrate_dfrobot_orp_(float x) const {
   // offset_mv: calibration offset from known ORP solution
   
   float raw_mv = x * 1000.0f;
-  float orp_mv = (this->dfrobot_mid_mv_ - raw_mv) - this->dfrobot_offset_mv_;
+  float orp_mv = (this->live_dfrobot_mid_mv_ - raw_mv) - this->live_dfrobot_offset_mv_;
   
   return orp_mv;
 }
@@ -624,12 +638,15 @@ void CalibrationEngine::load_from_preferences() {
   
   bool is_legacy_format = (data.magic == CALIBRATION_PREFS_MAGIC_V2);
   
-  // Restore calibration type
+  // Restore calibration type to both live and working
   this->type_ = static_cast<CalibrationType>(data.calibration_type);
+  this->live_type_ = this->type_;
   
   // Restore DFRobot params
   this->dfrobot_mid_mv_ = data.dfrobot_mid_mv;
   this->dfrobot_offset_mv_ = data.dfrobot_offset_mv;
+  this->live_dfrobot_mid_mv_ = this->dfrobot_mid_mv_;
+  this->live_dfrobot_offset_mv_ = this->dfrobot_offset_mv_;
   
   // Restore calibration temperature (Lot 5)
   if (!is_legacy_format) {
@@ -649,6 +666,12 @@ void CalibrationEngine::load_from_preferences() {
   }
   
   this->poly_coeffs_valid_ = false;
+
+  // Prefs load happens after codegen enable_draft_mode() — refresh draft so
+  // UI numbers match committed flash, not YAML seeds. Browser refresh is not undo.
+  if (this->draft_mode_enabled_) {
+    this->sync_draft_from_live();
+  }
   
   if (!std::isnan(this->calibration_temperature_)) {
     ESP_LOGI(CAL_TAG, "Loaded calibration from preferences: type=%s, %zu points, Tw=%.1f°C",
@@ -667,9 +690,9 @@ void CalibrationEngine::save_to_preferences() {
   
   CalibrationPrefsData data;
   data.magic = CALIBRATION_PREFS_MAGIC;
-  data.calibration_type = static_cast<uint8_t>(this->type_);
-  data.dfrobot_mid_mv = this->dfrobot_mid_mv_;
-  data.dfrobot_offset_mv = this->dfrobot_offset_mv_;
+  data.calibration_type = static_cast<uint8_t>(this->live_type_);
+  data.dfrobot_mid_mv = this->live_dfrobot_mid_mv_;
+  data.dfrobot_offset_mv = this->live_dfrobot_offset_mv_;
   data.calibration_temperature = this->calibration_temperature_;  // Lot 5
   
   // Save live points (not draft)
@@ -697,15 +720,16 @@ void CalibrationEngine::save_to_preferences() {
 }
 
 void CalibrationEngine::dump_config() const {
-  ESP_LOGCONFIG(CAL_TAG, "  Calibration type: %s", this->get_type_name());
+  ESP_LOGCONFIG(CAL_TAG, "  Calibration type (live): %s", calibration_type_name(this->live_type_));
   ESP_LOGCONFIG(CAL_TAG, "  Calibration valid: %s", this->is_valid() ? "YES" : "NO");
   ESP_LOGCONFIG(CAL_TAG, "  Live point count: %zu (min required: %d)", 
-                this->live_points_.size(), this->get_minimum_points());
+                this->live_points_.size(), this->get_minimum_points_for_type(this->live_type_));
   
   // Lot 7: Draft mode status
   if (this->draft_mode_enabled_) {
-    ESP_LOGCONFIG(CAL_TAG, "  Draft mode: ENABLED (%zu draft points, %s)",
+    ESP_LOGCONFIG(CAL_TAG, "  Draft mode: ENABLED (%zu draft points, type=%s, %s)",
                   this->draft_points_.size(),
+                  calibration_type_name(this->type_),
                   this->has_draft_changes_ ? "uncommitted changes" : "no changes");
   }
   

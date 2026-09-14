@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.17] - 2026-09-14
+
+### Fixed — Coherent Capturer Save / dirty-state UX
+
+With `draft_mode: false` (legacy), Point Count / Add / Remove / Capture mutate
+`live_points_` immediately. A HA page refresh does **not** reload the ESP, so
+there is no undo. `CalibrationSaveButton` only flushed already-live RAM to flash.
+
+Lot 7 already had draft/commit/discard, but:
+- `draft_mode` defaulted to false
+- Save did not `commit_draft()` (a separate Commit button was required)
+- Runtime algorithm / DFRobot mid-offset edits applied to published readings
+- Prefs load after codegen `enable_draft_mode()` left draft on YAML seeds
+
+### Changed
+- **`draft_mode: true` is the supported path** for multi-point Capturer channels
+- Point / count / capture / X/Y / algorithm / DFRobot edits go to **draft only**
+- `calibrate()` / `is_valid()` keep the **last committed** type + `live_points_`
+- **Save** = `commit_draft()` (draft → live + `save_to_preferences()` + clear dirty)
+- **Discard / Annuler** = revert draft to live, clear dirty
+- `draft_pending` is `ON` while the draft is dirty (dashboard can emphasize Save)
+- Prefs load resyncs draft from live so browser refresh is **not** the undo
+- `is_draft_valid()` remains available for UI feedback
+- Legacy `draft_mode: false` Save behavior is unchanged
+- Optional `commit_button` still works; prefer a single **Save** (do not require Commit+Save)
+
+### Migration
+Enable `draft_mode: true` + `draft_pending` + `discard_button`. Keep `save_button`.
+See [MIGRATION.md](docs/MIGRATION.md#capturer-draft-save-v0717).
+
+---
+
 ## [0.7.16] - 2026-09-13
 
 ### Fixed — Lot-2 review-fix ports (clean re-implementation on v0.7.15)
@@ -814,7 +846,7 @@ and the v0.7.15 number `register_component` fix are preserved.
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.16** | ✅ **HA polish, runtime algo select, draft/commit, Capturer UI sync, Lot-2 review-fix ports** | **Current** |
+| **7** | **0.7.17** | ✅ **HA polish, runtime algo select, draft/Save dirty UX, Capturer UI sync, Lot-2 review-fix ports** | **Current** |
 | 8 | — | (Optional) Interference detection, EZO | Future |
 
 ## Future Lots (Lot 8 candidates)

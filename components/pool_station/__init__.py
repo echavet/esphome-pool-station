@@ -491,11 +491,12 @@ def capturer_schema(channel_type):
     - algorithm_select: Select entity to change calibration type at runtime
     - add_point_button: Button to add a new calibration point
     - remove_point_button: Button to remove the last calibration point
-    - point_count_number: Number entity showing the live CalibrationEngine count
-    - draft_mode: Enable draft/commit workflow (default: false for backward compat)
-    - commit_button: Button to commit draft changes to live
-    - discard_button: Button to discard draft changes
-    - draft_pending: Binary sensor showing uncommitted draft changes
+    - point_count_number: Number entity showing the working (draft if draft_mode) count
+    - draft_mode: Enable draft/Save workflow (default: false for backward compat)
+    - save_button: When draft_mode is on, Save = commit draft → live + flash
+    - commit_button: Optional alias of Save (commit_draft); prefer Save
+    - discard_button: Revert draft to last committed/saved calibration
+    - draft_pending: Binary sensor ON when the draft is dirty (emphasize Save)
 
     point_count is the max number of HA number/button slots codegen'd at compile
     time (1-10). Recommend 5–10 when using add/remove. Add/remove cannot create

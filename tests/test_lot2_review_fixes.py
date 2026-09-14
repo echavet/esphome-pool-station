@@ -185,7 +185,7 @@ class SourceScanTest(unittest.TestCase):
     def test_is_implemented_declared_and_used(self):
         self.assertIn("is_type_implemented", self.header)
         self.assertIn("bool is_implemented() const", self.header)
-        self.assertIn("if (!this->is_implemented())", self.cpp)
+        self.assertIn("if (!is_type_implemented(type))", self.cpp)
         self.assertIn("case CAL_TYPE_EXPONENTIAL:", self.cpp)
         impl = self.cpp[self.cpp.find("CalibrationEngine::is_type_implemented") :]
         impl = impl.split("bool CalibrationEngine::is_valid")[0]
