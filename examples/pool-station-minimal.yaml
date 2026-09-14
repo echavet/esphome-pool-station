@@ -13,7 +13,7 @@
 #   - Lot 6: Gates and measurement campaigns (see README for full examples)
 #   - Lot 7: Runtime algorithm selection
 #   - Lot 7: Add/remove calibration points
-#   - Lot 7: Draft/Commit workflow
+#   - Lot 7: Draft/Save workflow
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -242,13 +242,18 @@ pool_station:
         point_count: 5
         capture_buttons: true
         point_numbers: true
-        save_button: true
+        save_button: true              # draft_mode: Save = commit + flash
         add_point_button:
           name: "Pressure Add Point"
         remove_point_button:
           name: "Pressure Remove Point"
         point_count_number:
           name: "Pressure Point Count"
+        draft_mode: true
+        discard_button:
+          name: "Pressure Discard Changes"
+        draft_pending:
+          name: "Pressure Draft Pending"
       
       # Calibration invalid indicator
       cal_invalid:
@@ -376,10 +381,10 @@ pool_station:
         point_count_number:
           name: "Pool pH Point Count"
         
-        # Draft/Commit workflow (preview changes before applying)
+        # Draft/Save: edits stay in draft; live readings keep last Save.
+        # Save commits draft → live + flash. Discard restores last saved.
+        # commit_button is optional (same as Save); prefer a single Save.
         draft_mode: true
-        commit_button:
-          name: "Pool pH Commit Calibration"
         discard_button:
           name: "Pool pH Discard Changes"
         draft_pending:
@@ -699,28 +704,29 @@ pool_station:
 #   point_count_number:          # Live engine count (+ optional resize 1-10)
 #     name: "pH Point Count"
 #
-# ## Draft/Commit Workflow
+# ## Draft/Save Workflow (v0.7.17)
 #
-# Preview calibration changes before applying them:
+# Edits stay in draft until Save. Live readings keep the last saved cal.
+# HA page refresh is NOT undo — use Discard.
 #
 # capturer:
-#   draft_mode: true             # Enable draft mode (default: false)
-#   commit_button:               # Apply draft → live (and save to flash)
-#     name: "pH Commit"
-#   discard_button:              # Revert draft to live
+#   save_button: true            # Commit draft → live + flash + clear dirty
+#   draft_mode: true             # Supported path for multi-point channels
+#   discard_button:              # Revert draft to last saved
 #     name: "pH Discard"
-#   draft_pending:               # Binary sensor: ON when uncommitted changes
+#   draft_pending:               # ON when dirty — emphasize Save
 #     name: "pH Draft Pending"
 #
 # Workflow:
 # 1. Enable draft_mode: true
-# 2. Edit points using Capturer UI (changes go to draft)
-# 3. Main sensor continues using live/committed calibration
-# 4. Press Commit to apply draft to live (and save to flash)
-# 5. Or press Discard to revert draft to live values
+# 2. Edit points / count / capture / algorithm (draft only)
+# 3. Main sensor continues using the last saved calibration
+# 4. Press Save to commit + persist
+# 5. Or press Discard / Annuler to restore last saved points
 #
 # BACKWARD COMPATIBILITY:
 # - draft_mode: false (default) = legacy behavior (direct edits)
+# - commit_button remains an optional alias of Save
 # - All Lot 7 components are opt-in (only created if declared)
 #
 # =============================================================================

@@ -102,9 +102,10 @@ static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCA110005;     // Lot 5 mag
  * - Runtime changes persist to flash (ESPHome preferences)
  * - Validation ensures minimum points for algorithm
  * 
- * Lot 7 additions:
- * - Draft/Commit workflow: Capturer edits draft set, live set used for publishing
- * - Runtime algorithm selection with automatic revalidation
+ * Lot 7 / v0.7.17:
+ * - Draft/Save workflow: Capturer edits draft; live used for publishing
+ * - Save = commit_draft (draft → live + flash); Discard restores live
+ * - Runtime algorithm selection is drafted when draft_mode is on
  * - Add/remove point functionality
  */
 class CalibrationEngine {
@@ -113,7 +114,10 @@ class CalibrationEngine {
   
   // Configuration
   void set_type(CalibrationType type);
+  // Working type: draft when draft_mode is on, otherwise live.
   CalibrationType get_type() const { return this->type_; }
+  // Committed type used by calibrate() / is_valid() / flash save.
+  CalibrationType get_live_type() const { return this->live_type_; }
   const char *get_type_name() const;
   
   void set_polynomial_order(uint8_t order) { this->polynomial_order_ = order; }
@@ -122,11 +126,11 @@ class CalibrationEngine {
   void set_precision(uint8_t decimals) { this->precision_decimals_ = decimals; }
   uint8_t get_precision() const { return this->precision_decimals_; }
   
-  // DFRobot ORP specific
-  void set_dfrobot_mid_mv(float mid) { this->dfrobot_mid_mv_ = mid; }
+  // DFRobot ORP specific (working/draft values; published calibrate uses live)
+  void set_dfrobot_mid_mv(float mid);
   float get_dfrobot_mid_mv() const { return this->dfrobot_mid_mv_; }
   
-  void set_dfrobot_offset_mv(float offset) { this->dfrobot_offset_mv_ = offset; }
+  void set_dfrobot_offset_mv(float offset);
   float get_dfrobot_offset_mv() const { return this->dfrobot_offset_mv_; }
   
   // Calibration temperature (Lot 5) - Tw at last save
@@ -165,6 +169,8 @@ class CalibrationEngine {
   void commit_draft();
   // Discard draft changes and revert to live set
   void discard_draft();
+  // Copy live → draft without logging (prefs load / enable)
+  void sync_draft_from_live();
   
   // Get the live/committed point count (for calibration)
   size_t get_live_point_count() const { return this->live_points_.size(); }
@@ -187,7 +193,8 @@ class CalibrationEngine {
   // Stub algorithms (exponential/logarithmic/power) are not implemented.
   // is_valid() is false for those types so cal_invalid reflects reality.
   static bool is_type_implemented(CalibrationType type);
-  bool is_implemented() const { return is_type_implemented(this->type_); }
+  // Published (live) implementation state — draft algo stubs do not flip this.
+  bool is_implemented() const { return is_type_implemented(this->live_type_); }
   
   // Main calibration function (uses LIVE points, not draft)
   float calibrate(float raw_voltage) const;
@@ -217,13 +224,17 @@ class CalibrationEngine {
   std::vector<CalibrationPoint> valid_points_copy_(
       const std::vector<CalibrationPoint> &src, bool sort_by_x) const;
   
-  CalibrationType type_{CAL_TYPE_NONE};
+  CalibrationType type_{CAL_TYPE_NONE};       // working / draft UI type
+  CalibrationType live_type_{CAL_TYPE_NONE};  // committed type for publish
   uint8_t polynomial_order_{2};
   uint8_t precision_decimals_{2};
   
-  // DFRobot ORP parameters
+  // DFRobot ORP parameters (working / draft)
   float dfrobot_mid_mv_{2500.0f};
   float dfrobot_offset_mv_{0.0f};
+  // Committed DFRobot params used by calibrate()
+  float live_dfrobot_mid_mv_{2500.0f};
+  float live_dfrobot_offset_mv_{0.0f};
   
   // Calibration temperature (Lot 5) - Tw at last save
   float calibration_temperature_{NAN};
@@ -250,6 +261,9 @@ class CalibrationEngine {
   // Validation state change callback (Lot 7)
   ValidationCallback validation_callback_{nullptr};
   void notify_validation_changed_();
+  void mark_draft_dirty_();
+  void commit_working_params_to_live_();
+  bool is_points_valid_(const std::vector<CalibrationPoint> &points, CalibrationType type) const;
   
   // Polynomial coefficients (computed on demand, uses live points)
   mutable std::vector<float> poly_coeffs_;

@@ -138,8 +138,9 @@ class CalibrationCaptureButton : public button::Button, public Component {
 };
 
 /**
- * Button to save calibration data to flash.
- * Persists current calibration points and parameters to preferences.
+ * Button to persist calibration.
+ * draft_mode on: commit draft → live + save_to_preferences() + clear dirty.
+ * draft_mode off: save live points to preferences (legacy).
  */
 class CalibrationSaveButton : public button::Button, public Component {
  public:
@@ -268,8 +269,8 @@ class CalibrationRemovePointButton : public button::Button, public Component {
 // ============================================================================
 
 /**
- * Button to commit draft calibration changes to live.
- * Also saves to preferences.
+ * Optional alias of Save when draft_mode is on.
+ * Commits draft → live and saves to preferences.
  */
 class CalibrationCommitButton : public button::Button, public Component {
  public:

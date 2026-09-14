@@ -11,7 +11,7 @@
 
 - **Rich N-point calibration** with multiple algorithms: linear, polynomial, piecewise, dfrobot_orp
 - **Capturer UI**: Calibration workflow directly from Home Assistant
-- **Draft/Commit workflow**: Preview changes before applying (Lot 7)
+- **Draft/Save workflow**: Edits stay in draft until Save (Lot 7)
 - **Runtime algorithm selection**: Change calibration type without reflashing (Lot 7)
 - **Calibration persistence**: Survives reboots via ESPHome preferences
 - **Real-time diagnostics**: noise detection, stuck detection, out-of-range flags
@@ -33,7 +33,7 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 | **Diagnostics** | 4 | ✅ Done | Noise/stuck/range flags, stats sensors, logging |
 | **Temperature Compensation** | 5 | ✅ Done | Nernstian pH model, optional ORP linear model |
 | **Gates/Campaigns** | 6 | ✅ Done | Conditional sampling, measurement campaigns |
-| **HA Polish** | 7 | ✅ Done | Runtime algo select, add/remove points, draft/commit |
+| **HA Polish** | 7 | ✅ Done | Runtime algo select, add/remove points, draft/Save |
 | **Interference Detection** | 8 | 🔮 Future | Cross-channel correlation (optional) |
 
 ## Current Status — Lot 7
@@ -44,8 +44,8 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 - ✅ **Point count number**: Live engine count + optional resize (1-10)
 - ✅ **Capturer UI sync**: Add/Remove/Save/capture/algo refresh HA numbers (v0.7.15)
 - ✅ **Stable NVS keys + slot-stable points**: MD5 prefs key, HA indices not reshuffled (v0.7.16)
-- ✅ **Draft/Commit workflow**: Edit draft, preview, then commit or discard
-- ✅ **Draft pending sensor**: Shows when uncommitted changes exist
+- ✅ **Draft/Save workflow**: Edit draft; live readings stay on last Save until Save
+- ✅ **Draft pending sensor**: `ON` when the draft is dirty (emphasize Save)
 - ✅ **Migration documentation**: From j5_ha_bridge and pool-firmata-wifi
 - ✅ **Unit tests**: Python tests for calibration and filter algorithms
 
@@ -443,7 +443,7 @@ Use calibration mode when:
 | 4 | 0.4.0 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
 | 5 | 0.5.0 | Water temperature compensation (Tw) | ✅ Done |
 | 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
-| **7** | **0.7.16** | **HA polish, runtime algo select, draft/commit, Lot-2 review-fix ports** | ✅ **Current** |
+| **7** | **0.7.17** | **HA polish, runtime algo select, draft/Save dirty UX, Lot-2 review-fix ports** | ✅ **Current** |
 | 8 | — | (Optional) Interference detection, EZO support | 🔮 Future |
 
 ### Lot 8 — Future / Out of Scope
@@ -492,29 +492,34 @@ capturer:
 - **remove_point_button**: Removes the last engine point and refreshes remaining slots (unused slots publish `unknown`/NaN).
 - **point_count_number**: Live `CalibrationEngine` count (and optional resize 1-10). This is **not** the same as `point_count` slots.
 
-### Draft/Commit Workflow
+### Draft/Save Workflow
 
-Preview calibration changes before applying them:
+Edits stay in a draft until **Save**. Live published readings keep the last
+committed calibration. A Home Assistant page refresh does **not** undo ESP
+state — use **Discard**.
 
 ```yaml
 capturer:
+  save_button: true              # Commit draft → live + flash + clear dirty
   draft_mode: true
-  commit_button:
-    name: "pH Commit Calibration"
   discard_button:
-    name: "pH Discard Changes"
+    name: "pH Discard Changes"   # Revert draft to last saved
   draft_pending:
-    name: "pH Draft Pending"
+    name: "pH Draft Pending"     # ON while dirty — emphasize Save
 ```
 
 **Workflow**:
-1. Enable `draft_mode: true` in YAML
-2. Edit points using Capturer UI (changes go to draft)
-3. Main sensor continues using live/committed calibration
-4. Press **Commit** to apply draft → live (and save to flash)
-5. Or press **Discard** to revert draft to live
+1. Enable `draft_mode: true` in YAML (supported path for multi-point channels)
+2. Edit points / count / capture / algorithm (changes go to draft only)
+3. Main sensor continues using the last **saved** calibration
+4. Press **Save** to commit draft → live and persist to flash
+5. Or press **Discard / Annuler** to restore the last saved points
 
-**draft_pending** binary sensor shows `ON` when uncommitted changes exist.
+**draft_pending** is `ON` when uncommitted changes exist. A Lovelace
+conditional card can highlight the Save button while it is on.
+
+`commit_button` remains an optional alias of Save. Prefer a single Save
+button — do not require both Commit and Save.
 
 ### Backward Compatibility
 
