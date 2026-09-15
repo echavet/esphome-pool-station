@@ -486,6 +486,7 @@ class SourceScanTest(unittest.TestCase):
             changelog = handle.read()
         self.assertIn("## [0.7.17]", changelog)
         self.assertIn("## [0.7.18]", changelog)
+        self.assertIn("## [0.8.1]", changelog)
 
         with open(EXAMPLE_YAML, encoding="utf-8") as handle:
             example = handle.read()

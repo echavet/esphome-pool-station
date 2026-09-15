@@ -1,3 +1,39 @@
+## [0.8.1] - 2026-09-15
+
+### Fixed — Restore Capturer draft UX entities after v0.8.0
+
+After the Lot 8 / v0.8.0 firmware rebuild (commit `6e6b4da`), Home Assistant
+pool-io lost calibration Save/Discard widgets even though C++ still had
+draft_mode:
+
+- `number.*_points_actifs` (`point_count_number`)
+- `binary_sensor.*_modifications_en_attente` (`draft_pending`)
+- `button.*` Annuler modifications (`discard_button`)
+- calibration point slots 4–5 (only 1–3 remained; schema default was 3)
+
+**Cause**: those widgets were YAML-opt-in only. `setup_capturer_ui` created
+them solely when the keys were present. `point_count` defaulted to 3 HA
+slots. `point_count_number` also registered *before* `set_parent`, and
+`draft_pending` / `draft_invalid` were not `register_component`'d so
+`loop()` never ran on ESPHome 2026.8 (`register_binary_sensor` does not
+register Component).
+
+**Restore** (no UX redesign):
+
+- `draft_mode: true` always codegens `point_count_number`, `discard_button`,
+  and `draft_pending` (auto-created if the YAML keys are omitted; declared
+  `name:` still wins — keep French names for stable HA entity IDs)
+- `point_count` default is **5** (max preallocated HA slots)
+- Parent/channel setters run before `number.register_number` for the count
+- `register_component` restored for Discard / draft_pending / draft_invalid
+  (Lot 7 original path)
+
+YAML keys to keep in `pool-station.yaml` for stable entity IDs: `point_count`,
+`point_count_number.name`, `discard_button.name`, `draft_pending.name`,
+`draft_mode`, `save_button`, plus optional `draft_invalid.name`.
+
+---
+
 ## [0.8.0] - 2026-09-15
 
 ### Added — Lot 8 interference detection
@@ -881,7 +917,7 @@ and the v0.7.15 number `register_component` fix are preserved.
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
 | **7** | **0.7.18** | ✅ HA polish, runtime algo select, draft/Save dirty UX, Capturer UI sync, Lot-2 review-fix ports | Done |
-| **8** | **0.8.0** | ✅ **Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw)** | **Current** |
+| **8** | **0.8.1** | ✅ **Interference detection + restore Capturer draft UX entities** | **Current** |
 
 ## Out of scope
 

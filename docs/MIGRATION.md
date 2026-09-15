@@ -10,6 +10,7 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 - [Calibration NVS key (v0.7.16)](#calibration-nvs-key-v0716)
 - [Capturer draft / Save (v0.7.17)](#capturer-draft-save-v0717)
 - [Capturer draft / Save review fixes (v0.7.18)](#capturer-draft-save-review-fixes-v0718)
+- [Restore Capturer draft entities (v0.8.1)](#restore-capturer-draft-entities-v081)
 - [Interference detection (v0.8.0)](#interference-detection-v080)
 - [SENSOR-IDENTITY Checklist Before OTA](#sensor-identity-checklist-before-ota)
 
@@ -288,6 +289,48 @@ capturer:
   mid_number: true
   offset_number: true
 ```
+
+---
+
+## Restore Capturer draft entities (v0.8.1)
+
+After the v0.8.0 Lot 8 OTA, pool-io could lose:
+
+- `number.*_points_actifs` (`point_count_number`)
+- `binary_sensor.*_modifications_en_attente` (`draft_pending`)
+- `button.*` Annuler (`discard_button`)
+- HA slots 4–5 (schema default was 3)
+
+v0.8.1 restores codegen. Keep these keys in `pool-station.yaml` so HA
+entity IDs stay the same (French `name:` values win over auto-created
+English defaults):
+
+```yaml
+capturer:
+  point_count: 5
+  capture_buttons: true
+  point_numbers: true
+  save_button: true
+  draft_mode: true
+  point_count_number:
+    name: "pH Points actifs"          # keep your existing name
+  discard_button:
+    name: "Annuler modifications"     # keep your existing name
+  draft_pending:
+    name: "Modifications en attente"  # keep your existing name
+  # optional
+  add_point_button:
+    name: "pH Add Point"
+  remove_point_button:
+    name: "pH Remove Point"
+  algorithm_select:
+    name: "pH Algorithm"
+  draft_invalid:
+    name: "pH Draft Invalid"
+```
+
+If a key above is omitted while `draft_mode: true`, the firmware still
+creates the entity (English default name). Prefer keeping the keys.
 
 ---
 

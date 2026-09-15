@@ -394,6 +394,46 @@ class CodegenRegistrationTest(unittest.TestCase):
         register_number("pressure_point0_y")
         self.assertEqual(registered, {"pressure_point0_x", "pressure_point0_y"})
 
+    def test_draft_mode_auto_creates_missing_ux_entities(self):
+        """v0.8.1: draft_mode must codegen count / Discard / draft_pending.
+
+        These were YAML-opt-in only. After the v0.8.0 Lot 8 rebuild, pool-io
+        lost number.*_points_actifs, binary_sensor.*_modifications_en_attente,
+        and button Annuler if those keys were omitted or stripped. Restore by
+        synthesizing the entities when draft_mode is on.
+        """
+        with open(INIT_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("def _capturer_auto_conf(", source)
+        self.assertIn("CONF_POINT_COUNT_NUMBER not in capturer_conf", source)
+        self.assertIn("CONF_DISCARD_BUTTON not in capturer_conf", source)
+        self.assertIn("CONF_DRAFT_PENDING not in capturer_conf", source)
+        self.assertIn("_point_count", source)
+        self.assertIn("_discard_cal", source)
+        self.assertIn("_draft_pending", source)
+        # Component registration restored for sensors that loop()
+        pending_start = source.find("# Draft pending sensor")
+        pending_end = source.find("# Draft invalid sensor", pending_start)
+        self.assertGreater(pending_end, pending_start)
+        pending_block = source[pending_start:pending_end]
+        self.assertIn("await cg.register_component(", pending_block)
+        self.assertIn("register_draft_pending_sensor", pending_block)
+        # Parent before register_number so setup() can publish
+        count_start = source.find("# Point count number")
+        count_end = source.find("# Draft mode configuration", count_start)
+        count_block = source[count_start:count_end]
+        self.assertLess(
+            count_block.find("set_parent("),
+            count_block.find("await number.register_number("),
+        )
+
+    def test_point_count_default_is_five_slots(self):
+        with open(INIT_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("CONF_POINT_COUNT, default=5", source)
+        self.assertIn("capturer_conf.get(CONF_POINT_COUNT, 5)", source)
+        self.assertNotIn("CONF_POINT_COUNT, default=3", source)
+
     def test_docs_distinguish_slots_from_live_count(self):
         with open(INIT_PATH, encoding="utf-8") as handle:
             init = handle.read()

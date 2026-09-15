@@ -772,7 +772,9 @@ pool_station:
 # BACKWARD COMPATIBILITY:
 # - draft_mode: false (default) = legacy behavior (direct edits)
 # - commit_button remains an optional alias of Save
-# - All Lot 7 components are opt-in (only created if declared)
+# - algorithm_select / add / remove / draft_invalid stay opt-in
+# - draft_mode: true always creates point_count_number, discard_button,
+#   draft_pending (v0.8.1). Keep YAML name: keys for stable HA entity IDs.
 #
 # =============================================================================
 # LOT 8: INTERFERENCE DETECTION
