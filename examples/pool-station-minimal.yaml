@@ -1,6 +1,6 @@
-# Pool Station — Example Configuration (Lot 7)
+# Pool Station — Example Configuration (Lot 8)
 # 
-# This configuration demonstrates Lots 2-7 features:
+# This configuration demonstrates Lots 2-8 features:
 #   - N-point calibration with multiple algorithms
 #   - Capturer UI for calibration from Home Assistant
 #   - Calibration persistence across reboots
@@ -14,6 +14,7 @@
 #   - Lot 7: Runtime algorithm selection
 #   - Lot 7: Add/remove calibration points
 #   - Lot 7: Draft/Save workflow
+#   - Lot 8: Station-level interference detection (orp↔pressure, ph↔orp)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -254,6 +255,8 @@ pool_station:
           name: "Pressure Discard Changes"
         draft_pending:
           name: "Pressure Draft Pending"
+        draft_invalid:
+          name: "Pressure Draft Invalid"
       
       # Calibration invalid indicator
       cal_invalid:
@@ -389,6 +392,8 @@ pool_station:
           name: "Pool pH Discard Changes"
         draft_pending:
           name: "Pool pH Draft Pending"
+        draft_invalid:
+          name: "Pool pH Draft Invalid"
       
       cal_invalid:
         name: "pH Cal Invalid"
@@ -477,16 +482,46 @@ pool_station:
         point_count: 1     # Can capture offset from known solution
         capture_buttons: true
         point_numbers: false  # Less useful for dfrobot_orp
-        save_button: true
+        save_button: true              # draft_mode: Save = commit + flash
         mid_number: true      # Enable mid_mv adjustment
         offset_number: true   # Enable offset_mv adjustment
+        draft_mode: true
+        discard_button:
+          name: "Pool ORP Discard Changes"
+        draft_pending:
+          name: "Pool ORP Draft Pending"
+        draft_invalid:
+          name: "Pool ORP Draft Invalid"
       
       cal_invalid:
         name: "ORP Cal Invalid"
 
-  # Water temperature for future Tw compensation (Lot 5)
+  # Water temperature for Tw compensation (Lot 5) and optional pH↔Tw coupling (Lot 8)
   water_temperature:
     sensor_id: water_temp
+
+  # =========================================================================
+  # Lot 8: Interference detection (opt-in, station-level)
+  # Suspected flags only — not a chemistry diagnosis, not Atlas EZO.
+  # Calibration Mode ON: no samples are pushed; windows reset on enter and leave.
+  # =========================================================================
+  interference:
+    coincident_jump: true      # ORP spike aligned with a pressure jump (pump/EMI)
+    shared_noise: true         # pH and ORP both noisy
+    tw_coupling: false         # set true to flag residual pH/Tw coupling
+    hold_time: 30s
+    jump_window: 90s           # must cover ORP update_interval (60s here)
+    tw_window: 180s            # two pH samples at 60s
+    orp_jump: 40.0             # mV (pre-jump-guard; max_jump does not hide this)
+    pressure_jump: 0.15        # bar
+    ph_sigma: 0.08
+    orp_sigma: 10.0
+    suspected:
+      name: "Pool Interference"
+    coincident_jump_flag:
+      name: "Pool Pump ORP Interference"
+    shared_noise_flag:
+      name: "Pool Shared Noise"
 
 # =============================================================================
 # HOW TO CALIBRATE FROM HOME ASSISTANT
@@ -704,10 +739,11 @@ pool_station:
 #   point_count_number:          # Live engine count (+ optional resize 1-10)
 #     name: "pH Point Count"
 #
-# ## Draft/Save Workflow (v0.7.17)
+# ## Draft/Save Workflow (v0.7.17 / v0.7.18)
 #
 # Edits stay in draft until Save. Live readings keep the last saved cal.
 # HA page refresh is NOT undo — use Discard.
+# Save is refused if the draft is invalid (v0.7.18).
 #
 # capturer:
 #   save_button: true            # Commit draft → live + flash + clear dirty
@@ -716,17 +752,36 @@ pool_station:
 #     name: "pH Discard"
 #   draft_pending:               # ON when dirty — emphasize Save
 #     name: "pH Draft Pending"
+#   draft_invalid:               # ON when Save would be refused
+#     name: "pH Draft Invalid"
 #
 # Workflow:
 # 1. Enable draft_mode: true
 # 2. Edit points / count / capture / algorithm (draft only)
 # 3. Main sensor continues using the last saved calibration
-# 4. Press Save to commit + persist
+# 4. Press Save to commit + persist (no-op if draft is invalid)
 # 5. Or press Discard / Annuler to restore last saved points
 #
 # BACKWARD COMPATIBILITY:
 # - draft_mode: false (default) = legacy behavior (direct edits)
 # - commit_button remains an optional alias of Save
 # - All Lot 7 components are opt-in (only created if declared)
+#
+# =============================================================================
+# LOT 8: INTERFERENCE DETECTION
+# =============================================================================
+#
+# Station-level flags (opt-in). Samples are pre-jump-guard (compensated).
+# jump_window must cover the slower channel (90s default for 60s ORP).
+# Calibration mode skips pushes and resets windows on enter/leave.
+#
+# interference:
+#   coincident_jump: true
+#   shared_noise: true
+#   tw_coupling: false
+#   hold_time: 30s
+#   jump_window: 90s
+#   suspected:
+#     name: "Pool Interference"
 #
 # =============================================================================

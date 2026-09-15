@@ -1,7 +1,7 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.7.17 (Lot 7 — draft/Save dirty UX: Save=commit, live stays last saved)  
-> Date: 2026-09-14  
+> Version: 0.8.0 (Lot 8 — détection d'interférences station, pas EZO)  
+> Date: 2026-09-15  
 > Auteur: @echavet
 
 ## 1. Vision
@@ -26,7 +26,7 @@
 | Réimplémenter ads1115/dallas/onewire | Compose les composants ESPHome existants |
 | Support natif Zelia/Zodiac | Protocoles propriétaires fermés |
 | Interface Lovelace v1 | Première version sans UI HA custom |
-| Support EZO (I2C Atlas) | Hors scope initial, peut-être Lot 8+ |
+| Support EZO (I2C Atlas) | Hors scope (pas de driver Atlas dans ce composant) |
 
 ## 3. Exigences fonctionnelles
 
@@ -47,7 +47,7 @@
 | F-CAL-02 | Algorithmes : linear, polynomial, piecewise ; dfrobot_orp **ORP only** (exponential, logarithmic, power: **non implémentés**) | 2 |
 | F-CAL-03 | Interface Capturer pour saisie guidée | 2 |
 | F-CAL-04 | Persistance preferences (flash) | 2 |
-| F-CAL-05 | Draft/Save workflow (Save=commit, Discard, draft_pending) | 2 |
+| F-CAL-05 | Draft/Save workflow (Save=commit, Discard, draft_pending, draft_invalid) | 2 |
 | F-CAL-06 | Indicateur `cal_invalid` si calibration périmée/absente | 2 |
 | F-CAL-07 | dfrobot_orp : mode mid/offset SEN0165-like | 2 |
 
@@ -123,8 +123,22 @@
 | F-HA-03 | Services calibration (via UI) | 7 | ✅ Done |
 | F-HA-04 | Notifications calibration périmée (cal_invalid) | 7 | ✅ Done |
 | F-HA-05 | Runtime algorithm selection | 7 | ✅ Done |
-| F-HA-06 | Draft/Save workflow (Save=commit, Discard, draft_pending) | 7 | ✅ Done |
+| F-HA-06 | Draft/Save workflow (Save=commit, Discard, draft_pending, draft_invalid) | 7 | ✅ Done |
 | F-HA-07 | Add/remove calibration points | 7 | ✅ Done |
+
+### F-INT : Détection d'interférences (station)
+
+Indicateurs de *suspicion*, pas un diagnostic chimique. Opt-in YAML `interference:`.
+
+| ID | Exigence | Lot | Status |
+|----|----------|-----|--------|
+| F-INT-01 | Saut coïncident ORP ↔ pression ; `jump_window` ≥ intervalle du canal le plus lent (défaut 90s) | 8 | ✅ Done |
+| F-INT-02 | Bruit partagé pH ↔ ORP (σ des deux canaux au-dessus seuil) | 8 | ✅ Done |
+| F-INT-03 | Couplage pH ↔ Tw optionnel ; `tw_window` ≥ 2× intervalle pH (défaut 180s) | 8 | ✅ Done |
+| F-INT-04 | Mode calibration : pas de push, reset des fenêtres à l'entrée et à la sortie | 8 | ✅ Done |
+| F-INT-05 | Hold time pour visibilité HA + binary_sensors `device_class: problem` | 8 | ✅ Done |
+| F-INT-06 | Pas de driver Atlas EZO / Zelia | 8 | ✅ Done (hors scope) |
+| F-INT-07 | Échantillons pré-jump-guard (compensated) pour ne pas masquer l'EMI pompe | 8 | ✅ Done |
 
 ## 4. Exigences non-fonctionnelles
 
@@ -171,9 +185,9 @@
 | 3 | Filters (j5-like median, jump, clamp) | ✅ Done |
 | 4 | Diagnostics (noise σ/ptp, stuck, flags) | ✅ Done |
 | 5 | Water temp compensation (Tw) | ✅ Done |
-| 6 | Gates/campaigns | Planned |
-| **7** | **HA polish, runtime algo select, draft/Save dirty UX** | ✅ **Current** |
-| 8 | (Optionnel) Interference detection, EZO | Future |
+| 6 | Gates/campaigns | ✅ Done |
+| 7 | HA polish, runtime algo select, draft/Save dirty UX | ✅ Done |
+| **8** | **Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw)** | ✅ **Current** |
 
 ## 8. Critères d'acceptation
 

@@ -171,6 +171,23 @@ CalibrationPointCountNumber = pool_station_ns.class_(
 DraftPendingSensor = pool_station_ns.class_(
     "DraftPendingSensor", binary_sensor.BinarySensor, cg.Component
 )
+DraftInvalidSensor = pool_station_ns.class_(
+    "DraftInvalidSensor", binary_sensor.BinarySensor, cg.Component
+)
+
+# Lot 8: Interference detection flags
+InterferenceSuspectedSensor = pool_station_ns.class_(
+    "InterferenceSuspectedSensor", binary_sensor.BinarySensor, cg.Component
+)
+InterferenceCoincidentJumpSensor = pool_station_ns.class_(
+    "InterferenceCoincidentJumpSensor", binary_sensor.BinarySensor, cg.Component
+)
+InterferenceSharedNoiseSensor = pool_station_ns.class_(
+    "InterferenceSharedNoiseSensor", binary_sensor.BinarySensor, cg.Component
+)
+InterferenceTwCouplingSensor = pool_station_ns.class_(
+    "InterferenceTwCouplingSensor", binary_sensor.BinarySensor, cg.Component
+)
 
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
@@ -281,7 +298,27 @@ CONF_COMMIT_BUTTON = "commit_button"
 CONF_DISCARD_BUTTON = "discard_button"
 CONF_POINT_COUNT_NUMBER = "point_count_number"
 CONF_DRAFT_PENDING = "draft_pending"
+CONF_DRAFT_INVALID = "draft_invalid"
 CONF_DRAFT_MODE = "draft_mode"
+
+# Interference detection (Lot 8)
+CONF_INTERFERENCE = "interference"
+CONF_COINCIDENT_JUMP = "coincident_jump"
+CONF_SHARED_NOISE = "shared_noise"
+CONF_TW_COUPLING = "tw_coupling"
+CONF_HOLD_TIME = "hold_time"
+CONF_JUMP_WINDOW = "jump_window"
+CONF_TW_WINDOW = "tw_window"
+CONF_ORP_JUMP = "orp_jump"
+CONF_PRESSURE_JUMP = "pressure_jump"
+CONF_PH_SIGMA = "ph_sigma"
+CONF_ORP_SIGMA = "orp_sigma"
+CONF_PH_JUMP = "ph_jump"
+CONF_TW_JUMP = "tw_jump"
+CONF_SUSPECTED = "suspected"
+CONF_COINCIDENT_JUMP_FLAG = "coincident_jump_flag"
+CONF_SHARED_NOISE_FLAG = "shared_noise_flag"
+CONF_TW_COUPLING_FLAG = "tw_coupling_flag"
 
 # Channel types enum (must match C++)
 CHANNEL_TYPE_PRESSURE = 0
@@ -497,6 +534,7 @@ def capturer_schema(channel_type):
     - commit_button: Optional alias of Save (commit_draft); prefer Save
     - discard_button: Revert draft to last committed/saved calibration
     - draft_pending: Binary sensor ON when the draft is dirty (emphasize Save)
+    - draft_invalid: Binary sensor ON when the draft cannot be Saved
 
     point_count is the max number of HA number/button slots codegen'd at compile
     time (1-10). Recommend 5–10 when using add/remove. Add/remove cannot create
@@ -550,6 +588,11 @@ def capturer_schema(channel_type):
         cv.Optional(CONF_DRAFT_PENDING): binary_sensor.binary_sensor_schema(
             DraftPendingSensor,
             icon="mdi:alert-circle-outline",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_DRAFT_INVALID): binary_sensor.binary_sensor_schema(
+            DraftInvalidSensor,
+            icon="mdi:alert-octagon",
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
     })
@@ -876,6 +919,48 @@ CALIBRATION_MODE_SCHEMA = switch.switch_schema(
 })
 
 
+def interference_schema():
+    """Station-level interference detection (Lot 8). Opt-in.
+
+    Flags are suspected-interference indicators, not a chemistry diagnosis.
+    Calibration mode suppresses detections and resets the rolling windows.
+    jump_window must cover the slower channel update_interval (ORP 60s → 90s).
+    tw_window must cover at least two pH samples (pH 60s → 180s).
+    """
+    def _flag(cls, icon):
+        return binary_sensor.binary_sensor_schema(
+            cls,
+            icon=icon,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        )
+    return cv.Schema({
+        cv.Optional(CONF_COINCIDENT_JUMP, default=True): cv.boolean,
+        cv.Optional(CONF_SHARED_NOISE, default=True): cv.boolean,
+        cv.Optional(CONF_TW_COUPLING, default=False): cv.boolean,
+        cv.Optional(CONF_HOLD_TIME, default="30s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_JUMP_WINDOW, default="90s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_TW_WINDOW, default="180s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_LOG_RATE_LIMIT, default="60s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_ORP_JUMP, default=40.0): cv.positive_float,
+        cv.Optional(CONF_PRESSURE_JUMP, default=0.15): cv.positive_float,
+        cv.Optional(CONF_PH_SIGMA, default=0.08): cv.positive_float,
+        cv.Optional(CONF_ORP_SIGMA, default=10.0): cv.positive_float,
+        cv.Optional(CONF_PH_JUMP, default=0.12): cv.positive_float,
+        cv.Optional(CONF_TW_JUMP, default=1.0): cv.positive_float,
+        cv.Optional(CONF_SUSPECTED): _flag(InterferenceSuspectedSensor, "mdi:vector-link"),
+        cv.Optional(CONF_COINCIDENT_JUMP_FLAG): _flag(
+            InterferenceCoincidentJumpSensor, "mdi:pump"
+        ),
+        cv.Optional(CONF_SHARED_NOISE_FLAG): _flag(
+            InterferenceSharedNoiseSensor, "mdi:waveform"
+        ),
+        cv.Optional(CONF_TW_COUPLING_FLAG): _flag(
+            InterferenceTwCouplingSensor, "mdi:thermometer-alert"
+        ),
+    })
+
+
 # Main CONFIG_SCHEMA for pool_station platform
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(PoolStationComponent),
@@ -899,6 +984,9 @@ CONFIG_SCHEMA = cv.Schema({
     
     # Campaigns (Lot 6) - one-shot measurement sequences
     cv.Optional(CONF_CAMPAIGNS): cv.ensure_list(campaign_schema()),
+
+    # Interference detection (Lot 8) - station-level, opt-in
+    cv.Optional(CONF_INTERFERENCE): interference_schema(),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -1143,6 +1231,15 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         cg.add(pending_var.set_channel_type(channel_type))
         cg.add(parent_var.register_draft_pending_sensor(pending_var, channel_type))
 
+    # Draft invalid sensor (Save will be refused while ON)
+    if CONF_DRAFT_INVALID in capturer_conf:
+        invalid_conf = capturer_conf[CONF_DRAFT_INVALID]
+        invalid_var = cg.new_Pvariable(invalid_conf[CONF_ID])
+        await binary_sensor.register_binary_sensor(invalid_var, invalid_conf)
+        cg.add(invalid_var.set_parent(parent_var))
+        cg.add(invalid_var.set_channel_type(channel_type))
+        cg.add(parent_var.register_draft_invalid_sensor(invalid_var, channel_type))
+
 
 async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):
     """Setup diagnostic sensors and flags for a channel (Lot 4)."""
@@ -1386,6 +1483,41 @@ async def setup_campaigns(config, parent_var):
         cg.add(parent_var.register_campaign(camp_var))
 
 
+async def setup_interference(config, parent_var):
+    """Setup station-level interference detection (Lot 8)."""
+    interf_conf = config.get(CONF_INTERFERENCE)
+    if interf_conf is None:
+        return
+
+    cg.add(parent_var.set_interference_enabled(True))
+    cg.add(parent_var.set_interference_enable_coincident_jump(interf_conf[CONF_COINCIDENT_JUMP]))
+    cg.add(parent_var.set_interference_enable_shared_noise(interf_conf[CONF_SHARED_NOISE]))
+    cg.add(parent_var.set_interference_enable_tw_coupling(interf_conf[CONF_TW_COUPLING]))
+    cg.add(parent_var.set_interference_hold_ms(interf_conf[CONF_HOLD_TIME]))
+    cg.add(parent_var.set_interference_jump_window_ms(interf_conf[CONF_JUMP_WINDOW]))
+    cg.add(parent_var.set_interference_tw_window_ms(interf_conf[CONF_TW_WINDOW]))
+    cg.add(parent_var.set_interference_log_rate_limit_ms(interf_conf[CONF_LOG_RATE_LIMIT]))
+    cg.add(parent_var.set_interference_orp_jump(interf_conf[CONF_ORP_JUMP]))
+    cg.add(parent_var.set_interference_pressure_jump(interf_conf[CONF_PRESSURE_JUMP]))
+    cg.add(parent_var.set_interference_ph_sigma(interf_conf[CONF_PH_SIGMA]))
+    cg.add(parent_var.set_interference_orp_sigma(interf_conf[CONF_ORP_SIGMA]))
+    cg.add(parent_var.set_interference_ph_jump(interf_conf[CONF_PH_JUMP]))
+    cg.add(parent_var.set_interference_tw_jump(interf_conf[CONF_TW_JUMP]))
+
+    async def _flag(conf_key, setter):
+        if conf_key not in interf_conf:
+            return
+        flag_conf = interf_conf[conf_key]
+        flag_var = cg.new_Pvariable(flag_conf[CONF_ID])
+        await binary_sensor.register_binary_sensor(flag_var, flag_conf)
+        cg.add(setter(flag_var))
+
+    await _flag(CONF_SUSPECTED, parent_var.set_interference_suspected_sensor)
+    await _flag(CONF_COINCIDENT_JUMP_FLAG, parent_var.set_interference_coincident_jump_sensor)
+    await _flag(CONF_SHARED_NOISE_FLAG, parent_var.set_interference_shared_noise_sensor)
+    await _flag(CONF_TW_COUPLING_FLAG, parent_var.set_interference_tw_coupling_sensor)
+
+
 async def to_code(config):
     """Generate C++ code for pool_station component."""
     var = cg.new_Pvariable(config[CONF_ID])
@@ -1520,3 +1652,6 @@ async def to_code(config):
     
     # Setup Campaigns (Lot 6)
     await setup_campaigns(config, var)
+
+    # Setup Interference detection (Lot 8)
+    await setup_interference(config, var)

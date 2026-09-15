@@ -139,7 +139,7 @@ class CalibrationCaptureButton : public button::Button, public Component {
 
 /**
  * Button to persist calibration.
- * draft_mode on: commit draft → live + save_to_preferences() + clear dirty.
+ * draft_mode on: commit draft → live + flash if draft is valid; else refuse.
  * draft_mode off: save live points to preferences (legacy).
  */
 class CalibrationSaveButton : public button::Button, public Component {
@@ -346,6 +346,31 @@ class DraftPendingSensor : public binary_sensor::BinarySensor, public Component 
   void loop() override;
   void dump_config() override;
   
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+  void update_from_calibration();
+
+ protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+  bool last_state_{false};
+  uint32_t last_check_{0};
+};
+
+/**
+ * Binary sensor indicating the working draft cannot be Saved.
+ * ON when draft_mode is on and is_draft_valid() is false.
+ * Independent of cal_invalid (which tracks the last committed live set).
+ */
+class DraftInvalidSensor : public binary_sensor::BinarySensor, public Component {
+ public:
+  DraftInvalidSensor() = default;
+
+  void setup() override;
+  void loop() override;
+  void dump_config() override;
+
   void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
   void set_channel_type(uint8_t type) { this->channel_type_ = type; }
 

@@ -19,6 +19,7 @@
 - **Compose ESPHome sensors**: uses native `ads1115`/`dallas`/`gpio` — does NOT reimplement drivers
 - **Stable entity IDs**: anti-swap protection by physical address (see [SENSOR-IDENTITY.md](docs/SENSOR-IDENTITY.md))
 - **Brand agnostic**: works with any analog pH/ORP probe
+- **Interference flags**: coincident ORP/pressure jumps, shared pH/ORP noise (Lot 8)
 
 Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.com/echavet/pool-firmata-wifi).
 
@@ -34,9 +35,28 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 | **Temperature Compensation** | 5 | ✅ Done | Nernstian pH model, optional ORP linear model |
 | **Gates/Campaigns** | 6 | ✅ Done | Conditional sampling, measurement campaigns |
 | **HA Polish** | 7 | ✅ Done | Runtime algo select, add/remove points, draft/Save |
-| **Interference Detection** | 8 | 🔮 Future | Cross-channel correlation (optional) |
+| **Interference Detection** | 8 | ✅ Done | Station-level coincident jump / shared noise / optional pH↔Tw |
 
-## Current Status — Lot 7
+## Current Status — Lot 8
+
+**Lot 8** — Station-level interference detection (opt-in, not Atlas EZO):
+- ✅ **Coincident jump** ORP ↔ pressure (pump / EMI); default `jump_window: 90s` covers 60s ORP
+- ✅ **Shared noise** pH ↔ ORP (both σ high)
+- ✅ **Tw coupling** optional; default `tw_window: 180s` covers two 60s pH samples
+- ✅ **Pre-jump-guard samples** so Lot 3 `max_jump` does not hide pump spikes
+- ✅ **Calibration mode** skips push and resets windows (enter and leave)
+- ✅ **Hold time** so Home Assistant sees a one-shot event
+- ✅ **Unit tests**: `tests/test_interference.py`
+
+**Previous Lots**:
+- **Lot 7**: HA polish, runtime algo select, draft/Save
+- **Lot 6**: Gates and measurement campaigns
+- **Lot 5**: Water temperature compensation (Nernstian pH, linear ORP)
+- **Lot 4**: Diagnostics (noise σ/ptp, stuck, out_of_range flags)
+- **Lot 3**: Filters (median window, jump guard, clamp)
+- **Lot 2**: N-point calibration, Capturer UI, persistence
+- **Lot 1**: ADS1115 binding, raw values, calibration mode switch
+- **Lot 0**: Component skeleton, documentation
 
 **Lot 7** — HA Polish + Migration Docs:
 - ✅ **Runtime algorithm select**: Change calibration type from HA without reflash
@@ -45,18 +65,12 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 - ✅ **Capturer UI sync**: Add/Remove/Save/capture/algo refresh HA numbers (v0.7.15)
 - ✅ **Stable NVS keys + slot-stable points**: MD5 prefs key, HA indices not reshuffled (v0.7.16)
 - ✅ **Draft/Save workflow**: Edit draft; live readings stay on last Save until Save
+- ✅ **Publish uses live type**: draft algo `none` does not drop committed calibration (v0.7.18)
+- ✅ **Save refuses invalid draft**: live + flash stay; Discard or fix points (v0.7.18)
+- ✅ **Draft invalid sensor**: `ON` when the draft cannot be Saved (v0.7.18)
 - ✅ **Draft pending sensor**: `ON` when the draft is dirty (emphasize Save)
 - ✅ **Migration documentation**: From j5_ha_bridge and pool-firmata-wifi
 - ✅ **Unit tests**: Python tests for calibration and filter algorithms
-
-**Previous Lots**:
-- **Lot 6**: Gates and measurement campaigns
-- **Lot 5**: Water temperature compensation (Nernstian pH, linear ORP)
-- **Lot 4**: Diagnostics (noise σ/ptp, stuck, out_of_range flags)
-- **Lot 3**: Filters (median window, jump guard, clamp)
-- **Lot 2**: N-point calibration, Capturer UI, persistence
-- **Lot 1**: ADS1115 binding, raw sensors, calibration mode
-- **Lot 0**: Component skeleton, documentation
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
@@ -443,16 +457,40 @@ Use calibration mode when:
 | 4 | 0.4.0 | Diagnostics (noise σ/ptp, stuck, out_of_range flags) | ✅ Done |
 | 5 | 0.5.0 | Water temperature compensation (Tw) | ✅ Done |
 | 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
-| **7** | **0.7.17** | **HA polish, runtime algo select, draft/Save dirty UX, Lot-2 review-fix ports** | ✅ **Current** |
-| 8 | — | (Optional) Interference detection, EZO support | 🔮 Future |
+| **7** | **0.7.18** | HA polish, runtime algo select, draft/Save dirty UX, Lot-2 review-fix ports | ✅ Done |
+| **8** | **0.8.0** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ **Current** |
 
-### Lot 8 — Future / Out of Scope
+### Lot 8 — Interference detection
 
-The following features are documented as potential future work but are **not planned** for implementation:
+Opt-in station-level **suspected interference** flags. This is **not** a chemistry diagnosis and **not** Atlas EZO.
 
-- **Interference/correlation detection**: Cross-channel chemistry analysis
-- **EZO (I2C Atlas Scientific) support**: Native Atlas driver integration
-- **Zelia/Zodiac protocols**: Proprietary closed protocols
+Samples are the **compensated** value (before jump guard). Set `jump_window` to at least the slower channel `update_interval` (90s default fits ORP at 60s + pressure at 2s).
+
+```yaml
+pool_station:
+  interference:
+    coincident_jump: true      # ORP + pressure jumped in the same window
+    shared_noise: true         # pH σ and ORP σ both high
+    tw_coupling: false         # opt-in: pH and Tw move together
+    hold_time: 30s
+    jump_window: 90s           # >= slower channel interval (ORP 60s)
+    tw_window: 180s            # >= two pH samples
+    orp_jump: 40.0             # mV
+    pressure_jump: 0.15        # bar
+    ph_sigma: 0.08
+    orp_sigma: 10.0
+    suspected:
+      name: "Pool Interference"
+    coincident_jump_flag:
+      name: "Pool Pump ORP Interference"
+    shared_noise_flag:
+      name: "Pool Shared Noise"
+```
+
+Out of scope for this component:
+
+- **EZO (I2C Atlas Scientific)** native driver
+- **Zelia/Zodiac** proprietary protocols
 
 ## Lot 7 — What's New
 
@@ -506,6 +544,8 @@ capturer:
     name: "pH Discard Changes"   # Revert draft to last saved
   draft_pending:
     name: "pH Draft Pending"     # ON while dirty — emphasize Save
+  draft_invalid:
+    name: "pH Draft Invalid"     # ON when Save would be refused
 ```
 
 **Workflow**:
@@ -513,13 +553,17 @@ capturer:
 2. Edit points / count / capture / algorithm (changes go to draft only)
 3. Main sensor continues using the last **saved** calibration
 4. Press **Save** to commit draft → live and persist to flash
+   (refused if the draft is invalid — live stays, use Discard or fix points)
 5. Or press **Discard / Annuler** to restore the last saved points
 
-**draft_pending** is `ON` when uncommitted changes exist. A Lovelace
-conditional card can highlight the Save button while it is on.
+**draft_pending** is `ON` when uncommitted changes exist. **draft_invalid**
+is `ON` when that draft cannot be Saved (too few points, algo `none`, etc.).
+`cal_invalid` still tracks the last **committed** set. A Lovelace
+conditional card can highlight Save while pending, and warn while invalid.
 
 `commit_button` remains an optional alias of Save. Prefer a single Save
-button — do not require both Commit and Save.
+button — do not require both Commit and Save. Save / Commit leave live
+and flash unchanged when the draft is invalid.
 
 ### Backward Compatibility
 

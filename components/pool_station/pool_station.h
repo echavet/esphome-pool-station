@@ -11,6 +11,7 @@
 #include "temperature_compensation.h"
 #include "measurement_gate.h"
 #include "measurement_campaign.h"
+#include "interference_detector.h"
 #include <vector>
 #include <map>
 #include <functional>
@@ -70,6 +71,7 @@ class CalibrationCommitButton;
 class CalibrationDiscardButton;
 class CalibrationPointCountNumber;
 class DraftPendingSensor;
+class DraftInvalidSensor;
 
 // Diagnostic flag forward declarations (Lot 4)
 class DiagnosticNoisyFlag;
@@ -87,6 +89,13 @@ class CampaignStartButton;
 class CampaignAbortButton;
 class CampaignRunningSensor;
 class CampaignResultSensor;
+
+// Interference detection forward declarations (Lot 8)
+class InterferenceDetector;
+class InterferenceSuspectedSensor;
+class InterferenceCoincidentJumpSensor;
+class InterferenceSharedNoiseSensor;
+class InterferenceTwCouplingSensor;
 
 /**
  * Main pool_station component.
@@ -141,6 +150,7 @@ class PoolStationComponent : public PollingComponent {
   void register_algorithm_select(CalibrationAlgorithmSelect *sel, uint8_t channel_type);
   void register_point_count_number(CalibrationPointCountNumber *num, uint8_t channel_type);
   void register_draft_pending_sensor(DraftPendingSensor *sensor, uint8_t channel_type);
+  void register_draft_invalid_sensor(DraftInvalidSensor *sensor, uint8_t channel_type);
 
   // Push engine state to all registered Capturer widgets for this channel.
   void refresh_calibration_ui(uint8_t channel_type);
@@ -155,7 +165,37 @@ class PoolStationComponent : public PollingComponent {
   MeasurementCampaign *get_campaign(const std::string &name);
   const std::map<std::string, MeasurementCampaign *> &get_campaigns() const { return this->campaigns_; }
 
+  // Interference detection (Lot 8)
+  void set_interference_enabled(bool enabled) { this->interference_enabled_ = enabled; }
+  void set_interference_enable_coincident_jump(bool v) { this->interference_.set_enable_coincident_jump(v); }
+  void set_interference_enable_shared_noise(bool v) { this->interference_.set_enable_shared_noise(v); }
+  void set_interference_enable_tw_coupling(bool v) { this->interference_.set_enable_tw_coupling(v); }
+  void set_interference_hold_ms(uint32_t v) { this->interference_.set_hold_ms(v); }
+  void set_interference_jump_window_ms(uint32_t v) { this->interference_.set_jump_window_ms(v); }
+  void set_interference_tw_window_ms(uint32_t v) { this->interference_.set_tw_window_ms(v); }
+  void set_interference_log_rate_limit_ms(uint32_t v) { this->interference_.set_log_rate_limit_ms(v); }
+  void set_interference_orp_jump(float v) { this->interference_.set_orp_jump(v); }
+  void set_interference_pressure_jump(float v) { this->interference_.set_pressure_jump(v); }
+  void set_interference_ph_sigma(float v) { this->interference_.set_ph_sigma(v); }
+  void set_interference_orp_sigma(float v) { this->interference_.set_orp_sigma(v); }
+  void set_interference_ph_jump(float v) { this->interference_.set_ph_jump(v); }
+  void set_interference_tw_jump(float v) { this->interference_.set_tw_jump(v); }
+  void set_interference_suspected_sensor(InterferenceSuspectedSensor *sensor) {
+    this->interference_suspected_sensor_ = sensor;
+  }
+  void set_interference_coincident_jump_sensor(InterferenceCoincidentJumpSensor *sensor) {
+    this->interference_coincident_jump_sensor_ = sensor;
+  }
+  void set_interference_shared_noise_sensor(InterferenceSharedNoiseSensor *sensor) {
+    this->interference_shared_noise_sensor_ = sensor;
+  }
+  void set_interference_tw_coupling_sensor(InterferenceTwCouplingSensor *sensor) {
+    this->interference_tw_coupling_sensor_ = sensor;
+  }
+  void on_channel_sample(uint8_t channel_type, float value, uint32_t now_ms);
+
  protected:
+  void publish_interference_(uint32_t now_ms);
   uint32_t calibration_interval_{1000};
   bool calibration_mode_active_{false};
   
@@ -180,9 +220,18 @@ class PoolStationComponent : public PollingComponent {
   std::map<uint8_t, CalibrationAlgorithmSelect *> algorithm_selects_;
   std::map<uint8_t, CalibrationPointCountNumber *> point_count_numbers_;
   std::map<uint8_t, DraftPendingSensor *> draft_pending_sensors_;
+  std::map<uint8_t, DraftInvalidSensor *> draft_invalid_sensors_;
 
   // Campaigns (Lot 6)
   std::map<std::string, MeasurementCampaign *> campaigns_;
+
+  // Interference detection (Lot 8)
+  bool interference_enabled_{false};
+  InterferenceDetector interference_{};
+  InterferenceSuspectedSensor *interference_suspected_sensor_{nullptr};
+  InterferenceCoincidentJumpSensor *interference_coincident_jump_sensor_{nullptr};
+  InterferenceSharedNoiseSensor *interference_shared_noise_sensor_{nullptr};
+  InterferenceTwCouplingSensor *interference_tw_coupling_sensor_{nullptr};
 };
 
 

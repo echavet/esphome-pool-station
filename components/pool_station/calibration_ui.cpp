@@ -296,6 +296,16 @@ void CalibrationSaveButton::press_action() {
   
   CalibrationEngine *engine = channel->get_calibration_engine();
   if (engine == nullptr) return;
+
+  // Do not persist an invalid draft (would brick live + flash until re-cal).
+  if (engine->is_draft_mode() && !engine->is_draft_valid()) {
+    ESP_LOGW(TAG,
+             "Save refused: draft invalid (type=%s, points=%zu, min=%d) for channel %d — live unchanged",
+             calibration_type_name(engine->get_type()), engine->get_point_count(),
+             engine->get_minimum_points_for_type(engine->get_type()), this->channel_type_);
+    channel->notify_calibration_updated();
+    return;
+  }
   
   // Lot 5: Capture water temperature at calibration time
   float water_temp = NAN;
@@ -587,6 +597,15 @@ void CalibrationCommitButton::press_action() {
     ESP_LOGW(TAG, "Cannot commit: draft mode not enabled for channel %d", this->channel_type_);
     return;
   }
+
+  if (!engine->is_draft_valid()) {
+    ESP_LOGW(TAG,
+             "Commit refused: draft invalid (type=%s, points=%zu, min=%d) for channel %d — live unchanged",
+             calibration_type_name(engine->get_type()), engine->get_point_count(),
+             engine->get_minimum_points_for_type(engine->get_type()), this->channel_type_);
+    channel->notify_calibration_updated();
+    return;
+  }
   
   // Capture water temperature before commit (Lot 5 compatibility)
   if (this->parent_->has_water_temperature()) {
@@ -748,6 +767,59 @@ void DraftPendingSensor::loop() {
 
 void DraftPendingSensor::dump_config() {
   LOG_BINARY_SENSOR("", "Draft Pending Sensor", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+// ============================================================================
+// Lot 7 / v0.7.18: DraftInvalidSensor
+// ============================================================================
+
+void DraftInvalidSensor::setup() {
+  ESP_LOGD(TAG, "Setting up DraftInvalidSensor (channel=%d)", this->channel_type_);
+  this->publish_state(false);
+}
+
+void DraftInvalidSensor::update_from_calibration() {
+  if (this->parent_ == nullptr) return;
+
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+
+  bool invalid = engine->is_draft_mode() && !engine->is_draft_valid();
+  const bool changed = invalid != this->last_state_;
+  this->last_state_ = invalid;
+  this->publish_state(invalid);
+
+  if (changed && invalid) {
+    ESP_LOGW(TAG, "Channel %d draft is INVALID — Save will be refused until points/algo are fixed",
+             this->channel_type_);
+  }
+}
+
+void DraftInvalidSensor::loop() {
+  uint32_t now = millis();
+  if (now - this->last_check_ < 500) {
+    return;
+  }
+  this->last_check_ = now;
+
+  if (this->parent_ == nullptr) return;
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) return;
+  CalibrationEngine *engine = channel->get_calibration_engine();
+  if (engine == nullptr) return;
+
+  bool invalid = engine->is_draft_mode() && !engine->is_draft_valid();
+  if (invalid != this->last_state_) {
+    this->update_from_calibration();
+  }
+}
+
+void DraftInvalidSensor::dump_config() {
+  LOG_BINARY_SENSOR("", "Draft Invalid Sensor", this);
   ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
 }
 

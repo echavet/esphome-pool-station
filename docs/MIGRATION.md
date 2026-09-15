@@ -9,6 +9,8 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 - [Entity ID Stability](#entity-id-stability)
 - [Calibration NVS key (v0.7.16)](#calibration-nvs-key-v0716)
 - [Capturer draft / Save (v0.7.17)](#capturer-draft-save-v0717)
+- [Capturer draft / Save review fixes (v0.7.18)](#capturer-draft-save-review-fixes-v0718)
+- [Interference detection (v0.8.0)](#interference-detection-v080)
 - [SENSOR-IDENTITY Checklist Before OTA](#sensor-identity-checklist-before-ota)
 
 ---
@@ -254,6 +256,75 @@ on. Prefer a single Save button.
 
 Lovelace note: dashboard wording such as "V croissant" means volts on the
 raw X axis; that label is a dashboard concern, not this firmware change.
+
+---
+
+## Capturer draft / Save review fixes (v0.7.18)
+
+v0.7.17 left three holes:
+
+- The publish pipeline still gated on `get_type()` (draft). Choosing
+  algorithm `none` without Save published raw values.
+- Save committed an invalid draft to live + flash (no undo after reboot).
+- Example ORP Capturer stayed on the legacy immediate-apply path.
+
+v0.7.18:
+
+- Published readings use `get_live_type()` + last committed points
+- Save / Commit no-op if `is_draft_valid()` is false (`draft_pending` stays ON)
+- `draft_invalid` is ON while Save would be refused (HA-visible; not `cal_invalid`)
+- Enable draft on ORP mid/offset the same way as pH / pressure:
+
+```yaml
+capturer:
+  save_button: true
+  draft_mode: true
+  discard_button:
+    name: "ORP Discard Changes"
+  draft_pending:
+    name: "ORP Draft Pending"
+  draft_invalid:
+    name: "ORP Draft Invalid"
+  mid_number: true
+  offset_number: true
+```
+
+---
+
+## Interference detection (v0.8.0)
+
+Lot 8 is **opt-in**. Existing YAML without `interference:` is unchanged.
+
+This is a **suspected interference** flag (pump/EMI coincidence), not a
+chemistry diagnosis and not Atlas EZO.
+
+Uses **pre-jump-guard** (compensated) samples. Default `jump_window: 90s`
+covers a 60s ORP channel vs 2s pressure. Calibration Mode skips pushes and
+resets the rolling windows on enter and leave.
+
+```yaml
+pool_station:
+  interference:
+    coincident_jump: true
+    shared_noise: true
+    tw_coupling: false
+    hold_time: 30s
+    jump_window: 90s
+    tw_window: 180s
+    orp_jump: 40.0
+    pressure_jump: 0.15
+    ph_sigma: 0.08
+    orp_sigma: 10.0
+    suspected:
+      name: "Pool Interference"
+    coincident_jump_flag:
+      name: "Pool Pump ORP Interference"
+    shared_noise_flag:
+      name: "Pool Shared Noise"
+```
+
+Turn **Calibration Mode** ON while using buffers so Capturer tours do not
+pollute σ windows.
 
 ---
 

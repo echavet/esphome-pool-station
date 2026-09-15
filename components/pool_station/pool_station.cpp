@@ -44,7 +44,14 @@ void PoolStationComponent::update() {
     float water_temp = this->get_water_temperature();
     if (!std::isnan(water_temp)) {
       ESP_LOGV(TAG, "  Water temperature: %.2f C", water_temp);
+      if (this->interference_enabled_ && !this->calibration_mode_active_) {
+        this->interference_.push_water_temp(water_temp, millis());
+      }
     }
+  }
+
+  if (this->interference_enabled_) {
+    this->publish_interference_(millis());
   }
 }
 
@@ -67,6 +74,30 @@ void PoolStationComponent::dump_config() {
     PoolStationChannelSensor *channel = pair.second;
     if (channel != nullptr) {
       ESP_LOGCONFIG(TAG, "    - %s", channel->get_channel_type_name());
+    }
+  }
+
+  if (this->interference_enabled_) {
+    const InterferenceConfig &ic = this->interference_.get_config();
+    ESP_LOGCONFIG(TAG, "  Interference detection: ON");
+    ESP_LOGCONFIG(TAG, "    coincident_jump: %s (orp>=%.1f, pressure>=%.2f, window=%u ms)",
+                  ic.enable_coincident_jump ? "YES" : "NO", ic.orp_jump, ic.pressure_jump, ic.jump_window_ms);
+    ESP_LOGCONFIG(TAG, "    shared_noise: %s (ph_sigma>=%.3f, orp_sigma>=%.1f)",
+                  ic.enable_shared_noise ? "YES" : "NO", ic.ph_sigma, ic.orp_sigma);
+    ESP_LOGCONFIG(TAG, "    tw_coupling: %s (ph>=%.3f, tw>=%.2f, window=%u ms)",
+                  ic.enable_tw_coupling ? "YES" : "NO", ic.ph_jump, ic.tw_jump, ic.tw_window_ms);
+    ESP_LOGCONFIG(TAG, "    hold_time: %u ms", ic.hold_ms);
+    ESP_LOGCONFIG(TAG, "    samples: pre-guard (compensated); jump_window must cover slower channel interval");
+    if (ic.enable_coincident_jump &&
+        (this->channels_.count(CHANNEL_TYPE_PRESSURE) == 0 || this->channels_.count(CHANNEL_TYPE_ORP) == 0)) {
+      ESP_LOGCONFIG(TAG, "    WARNING: coincident_jump needs both pressure and orp channels");
+    }
+    if (ic.enable_shared_noise &&
+        (this->channels_.count(CHANNEL_TYPE_PH) == 0 || this->channels_.count(CHANNEL_TYPE_ORP) == 0)) {
+      ESP_LOGCONFIG(TAG, "    WARNING: shared_noise needs both ph and orp channels");
+    }
+    if (ic.enable_tw_coupling && this->water_temp_sensor_ == nullptr) {
+      ESP_LOGCONFIG(TAG, "    WARNING: tw_coupling enabled but no water_temperature bound");
     }
   }
 }
@@ -114,6 +145,41 @@ void PoolStationComponent::set_calibration_mode_active(bool active) {
   if (this->calibration_mode_active_ != active) {
     this->calibration_mode_active_ = active;
     ESP_LOGI(TAG, "Calibration mode %s", active ? "ENABLED" : "DISABLED");
+    if (this->interference_enabled_) {
+      // Enter and leave Capturer with a clean window so buffer tours
+      // (pH 4/7/10) cannot trip shared_noise afterwards.
+      this->interference_.reset();
+      this->publish_interference_(millis());
+    }
+  }
+}
+
+void PoolStationComponent::on_channel_sample(uint8_t channel_type, float value, uint32_t now_ms) {
+  if (!this->interference_enabled_)
+    return;
+  if (this->calibration_mode_active_)
+    return;
+  this->interference_.push_channel(channel_type, value, now_ms);
+  this->publish_interference_(now_ms);
+}
+
+void PoolStationComponent::publish_interference_(uint32_t now_ms) {
+  const InterferenceFlags flags = this->interference_.evaluate(now_ms, this->calibration_mode_active_);
+  if (this->interference_suspected_sensor_ != nullptr) {
+    this->interference_suspected_sensor_->publish_state(flags.suspected);
+  }
+  if (this->interference_coincident_jump_sensor_ != nullptr) {
+    this->interference_coincident_jump_sensor_->publish_state(flags.coincident_jump);
+  }
+  if (this->interference_shared_noise_sensor_ != nullptr) {
+    this->interference_shared_noise_sensor_->publish_state(flags.shared_noise);
+  }
+  if (this->interference_tw_coupling_sensor_ != nullptr) {
+    this->interference_tw_coupling_sensor_->publish_state(flags.tw_coupling);
+  }
+  if (flags.suspected && this->interference_.should_log_now(now_ms)) {
+    ESP_LOGW(TAG, "[pool_station] Interference suspected (%s)", this->interference_.active_reason());
+    this->interference_.mark_logged(now_ms);
   }
 }
 
@@ -165,6 +231,11 @@ void PoolStationComponent::register_draft_pending_sensor(DraftPendingSensor *sen
   this->draft_pending_sensors_[channel_type] = sensor;
 }
 
+void PoolStationComponent::register_draft_invalid_sensor(DraftInvalidSensor *sensor, uint8_t channel_type) {
+  if (sensor == nullptr) return;
+  this->draft_invalid_sensors_[channel_type] = sensor;
+}
+
 void PoolStationComponent::refresh_calibration_ui(uint8_t channel_type) {
   auto x_it = this->point_x_numbers_.find(channel_type);
   if (x_it != this->point_x_numbers_.end()) {
@@ -212,6 +283,11 @@ void PoolStationComponent::refresh_calibration_ui(uint8_t channel_type) {
   auto draft_it = this->draft_pending_sensors_.find(channel_type);
   if (draft_it != this->draft_pending_sensors_.end() && draft_it->second != nullptr) {
     draft_it->second->update_from_calibration();
+  }
+
+  auto draft_invalid_it = this->draft_invalid_sensors_.find(channel_type);
+  if (draft_invalid_it != this->draft_invalid_sensors_.end() && draft_invalid_it->second != nullptr) {
+    draft_invalid_it->second->update_from_calibration();
   }
 }
 
@@ -317,13 +393,13 @@ void PoolStationChannelSensor::setup() {
   
   ESP_LOGD(TAG, "Channel %s subscribed to source sensor", this->get_channel_type_name());
   
-  // Log calibration status
-  if (this->calibration_.get_type() != CAL_TYPE_NONE) {
+  // Log published (live) calibration — draft algo must not hide a valid live set.
+  if (this->calibration_.get_live_type() != CAL_TYPE_NONE) {
     ESP_LOGI(TAG, "Channel %s calibration: type=%s, valid=%s, points=%zu",
              this->get_channel_type_name(),
              this->calibration_.get_type_name(),
              this->calibration_.is_valid() ? "YES" : "NO",
-             this->calibration_.get_point_count());
+             this->calibration_.get_live_point_count());
     
     // Publish calibration temperature if available (Lot 5)
     if (this->calibration_.has_calibration_temperature()) {
@@ -685,9 +761,9 @@ void PoolStationChannelSensor::on_source_value_(float value) {
     this->raw_sensor_->publish_state(filtered_raw);
   }
   
-  // Step 4: Apply calibration
+  // Step 4: Apply last committed calibration (draft type/points must not gate this)
   float calibrated;
-  if (this->calibration_.get_type() != CAL_TYPE_NONE && this->calibration_.is_valid()) {
+  if (this->calibration_.get_live_type() != CAL_TYPE_NONE && this->calibration_.is_valid()) {
     calibrated = this->calibration_.calibrate(filtered_raw);
   } else {
     // Fallback: use channel-specific default transforms
@@ -836,6 +912,12 @@ void PoolStationChannelSensor::on_source_value_(float value) {
       }
       this->diagnostics_.mark_logged(now);
     }
+  }
+
+  if (this->parent_ != nullptr) {
+    // Pre-jump-guard: Lot 3 max_jump would otherwise swallow the pump/EMI
+    // spikes this detector is meant to flag.
+    this->parent_->on_channel_sample(static_cast<uint8_t>(this->channel_type_), compensated, now);
   }
   
   ESP_LOGV(TAG, "Channel %s: raw=%.4f, filtered=%.4f, cal=%.3f, comp=%.3f, guarded=%.3f (type=%s)",

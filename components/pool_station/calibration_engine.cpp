@@ -4,7 +4,8 @@ namespace esphome {
 namespace pool_station {
 
 const char *CalibrationEngine::get_type_name() const {
-  return calibration_type_name(this->type_);
+  // Published / committed type — draft algorithm stays on get_type().
+  return calibration_type_name(this->live_type_);
 }
 
 // ============================================================================
@@ -230,6 +231,14 @@ void CalibrationEngine::commit_draft() {
     ESP_LOGW(CAL_TAG, "Cannot commit: draft mode not enabled");
     return;
   }
+
+  if (!this->is_draft_valid()) {
+    ESP_LOGW(CAL_TAG,
+             "Cannot commit: draft calibration is invalid (type=%s, %zu points, min=%d) — live unchanged",
+             calibration_type_name(this->type_), this->draft_points_.size(),
+             this->get_minimum_points_for_type(this->type_));
+    return;
+  }
   
   // Copy draft points + working algo/params to live
   this->live_points_ = this->draft_points_;
@@ -282,7 +291,7 @@ uint8_t CalibrationEngine::get_minimum_points_for_type(CalibrationType type) con
 }
 
 uint8_t CalibrationEngine::get_minimum_points() const {
-  return this->get_minimum_points_for_type(this->type_);
+  return this->get_minimum_points_for_type(this->live_type_);
 }
 
 bool CalibrationEngine::is_type_implemented(CalibrationType type) {

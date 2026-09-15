@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Draft/Save calibration UX (v0.7.17).
+"""Draft/Save calibration UX (v0.7.17 / v0.7.18).
 
 Eric's contract:
   - With draft_mode true, point/count/capture/algo edits touch draft only
   - Published calibrate() / is_valid() keep the last committed live set
-  - Save = commit draft → live + prefs + clear dirty
+  - Publish gate uses live type (draft algo none must not drop live cal)
+  - Save = commit draft → live + prefs + clear dirty, only if draft is valid
   - Discard restores draft from live (browser refresh is not undo)
   - draft_pending is true while dirty
 
@@ -25,9 +26,11 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ENGINE_CPP = os.path.join(ROOT, "components", "pool_station", "calibration_engine.cpp")
 ENGINE_H = os.path.join(ROOT, "components", "pool_station", "calibration_engine.h")
 UI_CPP = os.path.join(ROOT, "components", "pool_station", "calibration_ui.cpp")
+CHANNEL_CPP = os.path.join(ROOT, "components", "pool_station", "pool_station.cpp")
 README_PATH = os.path.join(ROOT, "README.md")
 MIGRATION_PATH = os.path.join(ROOT, "docs", "MIGRATION.md")
 CHANGELOG_PATH = os.path.join(ROOT, "CHANGELOG.md")
+EXAMPLE_YAML = os.path.join(ROOT, "examples", "pool-station-minimal.yaml")
 
 
 # =============================================================================
@@ -146,18 +149,33 @@ class DraftEngine:
         pts = self._working()
         if self.type == "none":
             return False
+        if self.type == "dfrobot_orp":
+            return True
         min_pts = 3 if self.type == "polynomial" else 2
         if len(pts) < min_pts:
             return False
         return all(not (math.isnan(x) or math.isnan(y)) for x, y in pts)
+
+    def is_draft_invalid(self):
+        return self.draft_mode_enabled and not self.is_draft_valid()
 
     def calibrate(self, raw):
         if self.live_type == "linear":
             return _linear(raw, self.live_points)
         return raw
 
+    def published_value(self, raw, channel="ph"):
+        # Mirrors on_source_value_ Step 4: live type + is_valid(), not draft type.
+        if self.live_type != "none" and self.is_valid():
+            return self.calibrate(raw)
+        if channel == "orp":
+            return raw * 1000.0
+        return raw
+
     def commit_draft(self):
         if not self.draft_mode_enabled:
+            return
+        if not self.is_draft_valid():
             return
         self.live_points = list(self.draft_points)
         self.live_type = self.type
@@ -184,6 +202,8 @@ class DraftEngine:
 
     def save_button(self):
         if self.draft_mode_enabled:
+            if not self.is_draft_valid():
+                return
             self.commit_draft()
         else:
             self.save_to_preferences()
@@ -287,6 +307,34 @@ class DraftSaveContractTest(unittest.TestCase):
         engine.save_button()
         self.assertEqual(engine.saved_points, [(0.5, 0.0)])
 
+    def test_draft_algo_none_keeps_published_live_calibration(self):
+        engine = DraftEngine(SEED, draft_mode=True)
+        before = engine.published_value(2.5)
+        engine.set_type_runtime("none")
+        self.assertEqual(engine.type, "none")
+        self.assertEqual(engine.live_type, "linear")
+        self.assertTrue(engine.is_valid())
+        self.assertFalse(engine.is_draft_valid())
+        self.assertTrue(engine.is_draft_invalid())
+        self.assertAlmostEqual(engine.published_value(2.5), before)
+        self.assertNotAlmostEqual(engine.published_value(2.5), 2.5)
+
+    def test_save_refuses_invalid_draft(self):
+        engine = DraftEngine(SEED, draft_mode=True)
+        live_before = list(engine.live_points)
+        published = engine.calibrate(2.5)
+        engine.set_point_count(1)
+        self.assertFalse(engine.is_draft_valid())
+        self.assertTrue(engine.is_draft_invalid())
+
+        engine.save_button()
+
+        self.assertEqual(engine.live_points, live_before)
+        self.assertIsNone(engine.saved_points)
+        self.assertTrue(engine.has_draft_changes)
+        self.assertAlmostEqual(engine.calibrate(2.5), published)
+        self.assertEqual(engine.get_point_count(), 1)
+
 
 class SourceScanTest(unittest.TestCase):
     def setUp(self):
@@ -296,6 +344,8 @@ class SourceScanTest(unittest.TestCase):
             self.header = handle.read()
         with open(UI_CPP, encoding="utf-8") as handle:
             self.ui = handle.read()
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            self.channel = handle.read()
 
     def _fn(self, source, signature):
         match = re.search(
@@ -309,8 +359,10 @@ class SourceScanTest(unittest.TestCase):
     def test_save_button_commits_when_draft_mode(self):
         body = self._fn(self.ui, "void CalibrationSaveButton::press_action()")
         self.assertIn("is_draft_mode()", body)
+        self.assertIn("is_draft_valid()", body)
         self.assertIn("commit_draft()", body)
         self.assertIn("save_to_preferences()", body)
+        self.assertLess(body.find("is_draft_valid()"), body.find("commit_draft()"))
         self.assertLess(body.find("is_draft_mode()"), body.find("commit_draft()"))
         self.assertIn("notify_calibration_updated()", body)
 
@@ -354,10 +406,44 @@ class SourceScanTest(unittest.TestCase):
 
     def test_commit_copies_params_and_saves(self):
         body = self._fn(self.engine, "void CalibrationEngine::commit_draft()")
+        self.assertIn("is_draft_valid()", body)
+        self.assertLess(body.find("is_draft_valid()"), body.find("this->live_points_ = this->draft_points_"))
         self.assertIn("this->live_points_ = this->draft_points_", body)
         self.assertIn("commit_working_params_to_live_()", body)
         self.assertIn("save_to_preferences()", body)
         self.assertIn("has_draft_changes_ = false", body)
+
+    def test_publish_gate_uses_live_type(self):
+        body = self._fn(self.channel, "void PoolStationChannelSensor::on_source_value_")
+        self.assertIn("get_live_type()", body)
+        self.assertLess(body.find("get_live_type()"), body.find("calibrate("))
+        apply = body[body.find("Step 4") :]
+        self.assertIn("get_live_type()", apply)
+        self.assertIn("get_live_type() != CAL_TYPE_NONE", apply)
+        self.assertIn("is_valid()", apply)
+        self.assertNotIn("get_type()", apply)
+
+    def test_commit_button_refuses_invalid_draft(self):
+        body = self._fn(self.ui, "void CalibrationCommitButton::press_action()")
+        self.assertIn("is_draft_valid()", body)
+        self.assertIn("commit_draft()", body)
+        self.assertLess(body.find("is_draft_valid()"), body.find("commit_draft()"))
+
+    def test_draft_invalid_sensor_uses_draft_validity(self):
+        body = self._fn(self.ui, "void DraftInvalidSensor::update_from_calibration()")
+        self.assertIn("is_draft_mode()", body)
+        self.assertIn("is_draft_valid()", body)
+        self.assertIn("publish_state(invalid)", body)
+        refresh = self._fn(self.channel, "void PoolStationComponent::refresh_calibration_ui")
+        self.assertIn("draft_invalid_sensors_", refresh)
+
+    def test_type_name_and_min_points_use_live(self):
+        name = self._fn(self.engine, "const char *CalibrationEngine::get_type_name() const")
+        self.assertIn("this->live_type_", name)
+        self.assertNotIn("this->type_", name)
+        mins = self._fn(self.engine, "uint8_t CalibrationEngine::get_minimum_points() const")
+        self.assertIn("this->live_type_", mins)
+        self.assertNotIn("this->type_", mins)
 
     def test_discard_resyncs_from_live(self):
         body = self._fn(self.engine, "void CalibrationEngine::discard_draft()")
@@ -384,18 +470,28 @@ class SourceScanTest(unittest.TestCase):
         self.assertIn("draft_mode: true", readme)
         self.assertIn("discard_button", readme)
         self.assertIn("draft_pending", readme)
+        self.assertIn("draft_invalid", readme)
         self.assertIn("Save", readme)
 
         with open(MIGRATION_PATH, encoding="utf-8") as handle:
             migration = handle.read()
         self.assertIn("0.7.17", migration)
+        self.assertIn("0.7.18", migration)
         self.assertIn("draft_mode: true", migration)
         self.assertIn("discard_button", migration)
         self.assertIn("draft_pending", migration)
+        self.assertIn("draft_invalid", migration)
 
         with open(CHANGELOG_PATH, encoding="utf-8") as handle:
             changelog = handle.read()
         self.assertIn("## [0.7.17]", changelog)
+        self.assertIn("## [0.7.18]", changelog)
+
+        with open(EXAMPLE_YAML, encoding="utf-8") as handle:
+            example = handle.read()
+        self.assertIn("Pool ORP Discard Changes", example)
+        self.assertIn("Pool ORP Draft Pending", example)
+        self.assertIn("Pool ORP Draft Invalid", example)
 
 
 if __name__ == "__main__":

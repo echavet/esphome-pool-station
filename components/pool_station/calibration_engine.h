@@ -102,9 +102,10 @@ static constexpr uint32_t CALIBRATION_PREFS_MAGIC = 0xCA110005;     // Lot 5 mag
  * - Runtime changes persist to flash (ESPHome preferences)
  * - Validation ensures minimum points for algorithm
  * 
- * Lot 7 / v0.7.17:
+ * Lot 7 / v0.7.18:
  * - Draft/Save workflow: Capturer edits draft; live used for publishing
- * - Save = commit_draft (draft → live + flash); Discard restores live
+ * - Save = commit_draft (draft → live + flash) only if draft is valid
+ * - Discard restores live; published path uses live_type_ (not draft type)
  * - Runtime algorithm selection is drafted when draft_mode is on
  * - Add/remove point functionality
  */
@@ -118,6 +119,7 @@ class CalibrationEngine {
   CalibrationType get_type() const { return this->type_; }
   // Committed type used by calibrate() / is_valid() / flash save.
   CalibrationType get_live_type() const { return this->live_type_; }
+  // Published / committed type name (not the draft working type).
   const char *get_type_name() const;
   
   void set_polynomial_order(uint8_t order) { this->polynomial_order_ = order; }
@@ -188,6 +190,7 @@ class CalibrationEngine {
   // Validation
   bool is_valid() const;
   bool is_draft_valid() const;
+  // Minimum points for the published / live algorithm.
   uint8_t get_minimum_points() const;
   uint8_t get_minimum_points_for_type(CalibrationType type) const;
   // Stub algorithms (exponential/logarithmic/power) are not implemented.

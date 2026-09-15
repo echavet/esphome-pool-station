@@ -1,9 +1,43 @@
-# Changelog
+## [0.8.0] - 2026-09-15
 
-All notable changes to this project will be documented in this file.
+### Added — Lot 8 interference detection
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Station-level **suspected interference** flags (not a chemistry oracle, not Atlas EZO):
+
+- **Coincident jump** ORP ↔ pressure: both jumped within `jump_window` (last-jump latch so a pump start then ORP spike still pairs).
+- **Shared noise** pH ↔ ORP: both rolling σ at or above threshold (own window, Lot 4 optional).
+- **Tw coupling** (opt-in): pH and water temperature move the same way over `tw_window`.
+- Calibration mode: no `push`, `reset()` on enter **and** leave (Capturer buffers must not look like EMI).
+- Samples are **pre-jump-guard** (compensated), so Lot 3 `max_jump` does not hide pump spikes.
+- `hold_time` keeps HA `device_class: problem` visible after a one-shot event.
+- YAML `pool_station.interference` is opt-in.
+
+### Fixed — review follow-ups (not yet released)
+
+- Default `jump_window` **90s** (covers ORP `update_interval: 60s` vs pressure 2s). A 2s window never pairs those channels.
+- Default `tw_window` **180s** so two pH samples at 60s exist in the delta window.
+- `time_delta_ms` / `later_ms` are millis wrap-safe (`dt < 2^31`).
+- `dump_config` warns if coincident_jump / shared_noise miss a required channel.
+
+---
+
+## [0.7.18] - 2026-09-15
+
+### Fixed — Draft/Save review follow-ups
+
+- Published pipeline gated on `get_type()` (draft). Selecting algorithm
+  `none` without Save published raw volts / ORP `V*1000` instead of the
+  last committed calibration. Gate now uses `get_live_type()`.
+- **Save / Commit refuse an invalid draft** (`is_draft_valid()`). Live +
+  flash stay on the last good set; `draft_pending` remains ON.
+- **`draft_invalid` binary sensor** is ON while the draft cannot be Saved
+  (HA-visible; independent of live `cal_invalid`).
+- `get_type_name()` / `get_minimum_points()` report the **live** algorithm
+  (same as `calibrate()` / `is_valid()`).
+- Example ORP Capturer now uses `draft_mode` + Discard + `draft_pending`
+  + `draft_invalid`.
+
+---
 
 ## [0.7.17] - 2026-09-14
 
@@ -846,12 +880,12 @@ and the v0.7.15 number `register_component` fix are preserved.
 | 4 | 0.4.0 | ✅ Diagnostics (noise σ/ptp, flags) | Done |
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
-| **7** | **0.7.17** | ✅ **HA polish, runtime algo select, draft/Save dirty UX, Capturer UI sync, Lot-2 review-fix ports** | **Current** |
-| 8 | — | (Optional) Interference detection, EZO | Future |
+| **7** | **0.7.18** | ✅ HA polish, runtime algo select, draft/Save dirty UX, Capturer UI sync, Lot-2 review-fix ports | Done |
+| **8** | **0.8.0** | ✅ **Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw)** | **Current** |
 
-## Future Lots (Lot 8 candidates)
+## Out of scope
 
-The following features are documented as potential future work:
+The following remain **out of this component**:
 
-- **Interference/correlation detection**: Cross-channel chemistry analysis
-- **EZO (I2C Atlas Scientific) support**: Native driver for Atlas sensors
+- **EZO (I2C Atlas Scientific)**: native Atlas driver
+- **Zelia/Zodiac protocols**: proprietary closed protocols

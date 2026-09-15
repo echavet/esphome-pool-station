@@ -45,6 +45,7 @@ class FakeEngine:
         self._points = list(points or [])
         self.algo = algo
         self.draft_pending = False
+        self.is_draft_mode = False
 
     def get_point_count(self):
         return len(self._points)
@@ -64,6 +65,9 @@ class FakeEngine:
     def is_valid(self):
         return len(self._points) >= 2 and self.algo != "none"
 
+    def is_draft_valid(self):
+        return self.is_valid()
+
 
 class FakeWidget:
     def __init__(self):
@@ -81,6 +85,7 @@ def refresh_calibration_ui(
     algorithm_select=None,
     cal_invalid=None,
     draft_pending=None,
+    draft_invalid=None,
 ):
     """Mirror PoolStationComponent::refresh_calibration_ui for one channel."""
     for idx, num in point_x.items():
@@ -97,6 +102,8 @@ def refresh_calibration_ui(
         cal_invalid.publish_state(not engine.is_valid())
     if draft_pending is not None:
         draft_pending.publish_state(engine.draft_pending)
+    if draft_invalid is not None:
+        draft_invalid.publish_state(engine.is_draft_mode and not engine.is_draft_valid())
 
 
 def make_slots(count):
@@ -160,13 +167,25 @@ class NotifyRefreshContractTest(unittest.TestCase):
     def test_algorithm_and_draft_widgets_refresh(self):
         engine = FakeEngine([(1.0, 4.0), (1.5, 7.0)], algo="piecewise")
         engine.draft_pending = True
+        engine.is_draft_mode = True
         algo = FakeWidget()
         draft = FakeWidget()
+        invalid = FakeWidget()
         refresh_calibration_ui(
-            engine, {}, {}, algorithm_select=algo, draft_pending=draft
+            engine,
+            {},
+            {},
+            algorithm_select=algo,
+            draft_pending=draft,
+            draft_invalid=invalid,
         )
         self.assertEqual(algo.state, "piecewise")
         self.assertTrue(draft.state)
+        self.assertFalse(invalid.state)
+
+        engine.algo = "none"
+        refresh_calibration_ui(engine, {}, {}, draft_invalid=invalid)
+        self.assertTrue(invalid.state)
 
     def test_capture_publishes_x_even_if_y_is_nan(self):
         """Capturer writes X first; HA must show volts before Y is edited."""
@@ -219,6 +238,7 @@ class NotifyImplementationTest(unittest.TestCase):
             "point_count_numbers_",
             "cal_invalid_sensors_",
             "draft_pending_sensors_",
+            "draft_invalid_sensors_",
             "update_from_calibration()",
         ):
             self.assertIn(needle, body, needle)
@@ -232,6 +252,7 @@ class NotifyImplementationTest(unittest.TestCase):
         self.assertIn("register_algorithm_select", source)
         self.assertIn("register_point_count_number", source)
         self.assertIn("register_draft_pending_sensor", source)
+        self.assertIn("register_draft_invalid_sensor", source)
         self.assertIn("point_count_numbers_", source)
         self.assertIn("algorithm_selects_", source)
 
@@ -294,6 +315,7 @@ class CodegenRegistrationTest(unittest.TestCase):
         self.assertIn("register_algorithm_select", source)
         self.assertIn("register_point_count_number", source)
         self.assertIn("register_draft_pending_sensor", source)
+        self.assertIn("register_draft_invalid_sensor", source)
 
         tree = ast.parse(source)
         attrs = []
@@ -307,6 +329,7 @@ class CodegenRegistrationTest(unittest.TestCase):
         self.assertIn("register_algorithm_select", attrs)
         self.assertIn("register_point_count_number", attrs)
         self.assertIn("register_draft_pending_sensor", attrs)
+        self.assertIn("register_draft_invalid_sensor", attrs)
         self.assertIn("register_point_x_number", attrs)
         self.assertIn("register_point_y_number", attrs)
 
