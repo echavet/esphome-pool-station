@@ -47,9 +47,16 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-# Enable logging
+# Logging (ESPHome 2026.8+)
+# `level` is the compile ceiling: DEBUG lines are stripped if it is INFO.
+# You cannot set one tag more verbose than `level`. To have the firmware
+# quiet at INFO but pool_station at DEBUG:
+#   - compile DEBUG (`level`)
+#   - start at INFO (`initial_level`)
+#   - raise only the tags you want
 logger:
-  level: INFO
+  level: DEBUG
+  initial_level: INFO
   logs:
     pool_station: DEBUG
     pool_station.cal: DEBUG
