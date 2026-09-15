@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.8.0 (Lot 8 — détection d'interférences station, pas EZO)  
+> Version: 0.8.1 (Lot 8 — détection d'interférences station, pas EZO)  
 > Date: 2026-09-15  
 > Auteur: @echavet
 

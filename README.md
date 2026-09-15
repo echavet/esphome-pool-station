@@ -47,6 +47,7 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 - ✅ **Calibration mode** skips push and resets windows (enter and leave)
 - ✅ **Hold time** so Home Assistant sees a one-shot event
 - ✅ **Unit tests**: `tests/test_interference.py`
+- ✅ **v0.8.1**: restore Capturer `point_count_number` / Discard / `draft_pending` when `draft_mode: true`
 
 **Previous Lots**:
 - **Lot 7**: HA polish, runtime algo select, draft/Save
@@ -458,7 +459,7 @@ Use calibration mode when:
 | 5 | 0.5.0 | Water temperature compensation (Tw) | ✅ Done |
 | 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
 | **7** | **0.7.18** | HA polish, runtime algo select, draft/Save dirty UX, Lot-2 review-fix ports | ✅ Done |
-| **8** | **0.8.0** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ **Current** |
+| **8** | **0.8.1** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ **Current** |
 
 ### Lot 8 — Interference detection
 
@@ -561,6 +562,11 @@ is `ON` when that draft cannot be Saved (too few points, algo `none`, etc.).
 `cal_invalid` still tracks the last **committed** set. A Lovelace
 conditional card can highlight Save while pending, and warn while invalid.
 
+When `draft_mode: true`, firmware **always** registers `point_count_number`,
+`discard_button`, and `draft_pending` (v0.8.1). Keep the YAML `name:` keys
+so Home Assistant entity IDs stay stable (e.g. `*_points_actifs`,
+`*_modifications_en_attente`, **Annuler modifications**).
+
 `commit_button` remains an optional alias of Save. Prefer a single Save
 button — do not require both Commit and Save. Save / Commit leave live
 and flash unchanged when the draft is invalid.
@@ -568,7 +574,8 @@ and flash unchanged when the draft is invalid.
 ### Backward Compatibility
 
 - `draft_mode: false` (default): Legacy behavior, edits apply immediately
-- All new UI components are **opt-in** (only created if declared in YAML)
+- `algorithm_select` / add / remove / `draft_invalid` stay **opt-in**
+- `draft_mode: true` always creates count / Discard / `draft_pending`
 - Existing configurations work without modification
 
 ---

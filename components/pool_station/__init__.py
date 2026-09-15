@@ -540,10 +540,14 @@ def capturer_schema(channel_type):
     time (1-10). Recommend 5–10 when using add/remove. Add/remove cannot create
     new HA entities beyond these preallocated slots. point_count_number reports
     the live engine count, which may be smaller than the slot count.
+
+    When draft_mode is true, codegen always registers point_count_number,
+    discard_button, and draft_pending (auto-created if those YAML keys are
+    omitted) so Save / Annuler / dirty dashboards keep working.
     """
     return cv.Schema({
         # Max preallocated HA slots (not the live engine count).
-        cv.Optional(CONF_POINT_COUNT, default=3): cv.int_range(min=1, max=10),
+        cv.Optional(CONF_POINT_COUNT, default=5): cv.int_range(min=1, max=10),
         cv.Optional(CONF_CAPTURE_BUTTONS, default=True): cv.boolean,
         cv.Optional(CONF_POINT_NUMBERS, default=True): cv.boolean,
         cv.Optional(CONF_SAVE_BUTTON, default=True): cv.boolean,
@@ -990,6 +994,14 @@ CONFIG_SCHEMA = cv.Schema({
 }).extend(cv.COMPONENT_SCHEMA)
 
 
+def _capturer_auto_conf(schema, entity_id, name):
+    """Fill ESPHome 2026.8 entity defaults for an auto-created Capturer widget."""
+    return schema({
+        CONF_ID: entity_id,
+        CONF_NAME: name,
+    })
+
+
 async def setup_capturer_ui(config, parent_var, channel_var, channel_type, channel_key):
     """Setup Capturer UI entities for a channel.
     
@@ -1002,7 +1014,8 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
     
     defaults = CHANNEL_DEFAULTS.get(channel_key, {})
     # Compile-time HA slot count. Add/remove cannot create entities past this.
-    point_count = capturer_conf.get(CONF_POINT_COUNT, 3)
+    point_count = capturer_conf.get(CONF_POINT_COUNT, 5)
+    draft_mode_enabled = capturer_conf.get(CONF_DRAFT_MODE, False)
     
     # Pre-create schemas with defaults for dynamic entities
     # These schemas add all required entity keys (disabled_by_default, mode, etc.)
@@ -1040,6 +1053,42 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         entity_category=ENTITY_CATEGORY_CONFIG,
         unit_of_measurement="mV",
     )
+    point_count_num_schema = number.number_schema(
+        CalibrationPointCountNumber,
+        icon="mdi:counter",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+    )
+    discard_btn_schema = button.button_schema(
+        CalibrationDiscardButton,
+        icon="mdi:close-circle",
+        entity_category=ENTITY_CATEGORY_CONFIG,
+    )
+    draft_pending_schema = binary_sensor.binary_sensor_schema(
+        DraftPendingSensor,
+        icon="mdi:alert-circle-outline",
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    )
+
+    # draft_mode: always emit count / Discard / dirty entities. YAML name: wins.
+    if draft_mode_enabled:
+        if CONF_POINT_COUNT_NUMBER not in capturer_conf:
+            capturer_conf[CONF_POINT_COUNT_NUMBER] = _capturer_auto_conf(
+                point_count_num_schema,
+                f"{channel_key}_point_count",
+                f"{channel_key.title()} Point Count",
+            )
+        if CONF_DISCARD_BUTTON not in capturer_conf:
+            capturer_conf[CONF_DISCARD_BUTTON] = _capturer_auto_conf(
+                discard_btn_schema,
+                f"{channel_key}_discard_cal",
+                f"{channel_key.title()} Discard Changes",
+            )
+        if CONF_DRAFT_PENDING not in capturer_conf:
+            capturer_conf[CONF_DRAFT_PENDING] = _capturer_auto_conf(
+                draft_pending_schema,
+                f"{channel_key}_draft_pending",
+                f"{channel_key.title()} Draft Pending",
+            )
     
     # Create capture buttons and point numbers for each point
     for point_idx in range(point_count):
@@ -1187,58 +1236,65 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         cg.add(remove_var.set_parent(parent_var))
         cg.add(remove_var.set_channel_type(channel_type))
     
-    # Point count number
+    # Point count number (always present when draft_mode is on)
     if CONF_POINT_COUNT_NUMBER in capturer_conf:
         count_conf = capturer_conf[CONF_POINT_COUNT_NUMBER]
         count_var = cg.new_Pvariable(count_conf[CONF_ID])
+        # Parent/channel before register_number so setup() can publish.
+        # Do NOT call cg.register_component: number.register_number already
+        # registers the Component (ESPHome 2026.4+).
+        cg.add(count_var.set_parent(parent_var))
+        cg.add(count_var.set_channel_type(channel_type))
+        cg.add(parent_var.register_point_count_number(count_var, channel_type))
         await number.register_number(
             count_var, count_conf,
             min_value=1.0,
             max_value=10.0,
             step=1.0,
         )
-        cg.add(count_var.set_parent(parent_var))
-        cg.add(count_var.set_channel_type(channel_type))
-        cg.add(parent_var.register_point_count_number(count_var, channel_type))
-        # number.register_number already registered the Component.
     
     # Draft mode configuration
-    draft_mode_enabled = capturer_conf.get(CONF_DRAFT_MODE, False)
     cg.add(channel_var.set_draft_mode_enabled(draft_mode_enabled))
     
     # Commit button (only if draft mode enabled)
     if CONF_COMMIT_BUTTON in capturer_conf:
         commit_conf = capturer_conf[CONF_COMMIT_BUTTON]
         commit_var = cg.new_Pvariable(commit_conf[CONF_ID])
-        await button.register_button(commit_var, commit_conf)
         cg.add(commit_var.set_parent(parent_var))
         cg.add(commit_var.set_channel_type(channel_type))
+        await cg.register_component(commit_var, commit_conf)
+        await button.register_button(commit_var, commit_conf)
     
-    # Discard button (only if draft mode enabled)
+    # Discard button (always present when draft_mode is on)
     if CONF_DISCARD_BUTTON in capturer_conf:
         discard_conf = capturer_conf[CONF_DISCARD_BUTTON]
         discard_var = cg.new_Pvariable(discard_conf[CONF_ID])
-        await button.register_button(discard_var, discard_conf)
         cg.add(discard_var.set_parent(parent_var))
         cg.add(discard_var.set_channel_type(channel_type))
+        await cg.register_component(discard_var, discard_conf)
+        await button.register_button(discard_var, discard_conf)
     
-    # Draft pending sensor
+    # Draft pending sensor (always present when draft_mode is on)
     if CONF_DRAFT_PENDING in capturer_conf:
         pending_conf = capturer_conf[CONF_DRAFT_PENDING]
         pending_var = cg.new_Pvariable(pending_conf[CONF_ID])
-        await binary_sensor.register_binary_sensor(pending_var, pending_conf)
         cg.add(pending_var.set_parent(parent_var))
         cg.add(pending_var.set_channel_type(channel_type))
         cg.add(parent_var.register_draft_pending_sensor(pending_var, channel_type))
+        # loop()/setup() require Component registration; register_binary_sensor
+        # does not register Component on ESPHome 2026.8.
+        await cg.register_component(pending_var, pending_conf)
+        await binary_sensor.register_binary_sensor(pending_var, pending_conf)
 
     # Draft invalid sensor (Save will be refused while ON)
     if CONF_DRAFT_INVALID in capturer_conf:
         invalid_conf = capturer_conf[CONF_DRAFT_INVALID]
         invalid_var = cg.new_Pvariable(invalid_conf[CONF_ID])
-        await binary_sensor.register_binary_sensor(invalid_var, invalid_conf)
         cg.add(invalid_var.set_parent(parent_var))
         cg.add(invalid_var.set_channel_type(channel_type))
         cg.add(parent_var.register_draft_invalid_sensor(invalid_var, channel_type))
+        await cg.register_component(invalid_var, invalid_conf)
+        await binary_sensor.register_binary_sensor(invalid_var, invalid_conf)
 
 
 async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):
