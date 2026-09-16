@@ -744,7 +744,7 @@ Example entities for pH channel:
 
 - [CDC (Cahier des Charges)](docs/POOL-STATION-CDC.md) — Full requirements specification
 - [SENSOR-IDENTITY](docs/SENSOR-IDENTITY.md) — Anti-swap address binding table
-- [pH j5 vs ADS](docs/PH-J5-VS-POOL-STATION-ADS.md) — Why DFRobot pH can read 8.2 on ADS vs 7.4 on the reference meter
+- [pH j5 vs ADS](docs/PH-J5-VS-POOL-STATION-ADS.md) — ADC→volts migration, abnormal 3.406 V @ 7.4, ADS gain 4.096 rail
 - [CHANGELOG](CHANGELOG.md) — Version history
 - [Examples](examples/) — YAML configuration examples
 
