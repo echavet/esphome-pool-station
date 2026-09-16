@@ -102,8 +102,11 @@ one_wire:
 
 # =============================================================================
 # ADS1115 Source Sensors
-# These are the RAW ADC readings that pool_station channels consume.
-# Gain 4.096 gives ±4.096V range (resolution ~0.125mV)
+# These are VOLTS (ESPHome ads1115), not Arduino 0–1023 counts.
+# Gain 4.096 = ±4.096 V (LSB ~0.125 mV) and SATURATES any signal ≥ 4.096 V.
+# Eric pool-io: pH raw stuck at ~4.094 V with this gain → published pH is
+# meaningless until gain/wiring is fixed. Use 6.144 to read 0–5 V isolators.
+# See docs/PH-J5-VS-POOL-STATION-ADS.md.
 # =============================================================================
 sensor:
   # ---------------------------------------------------------------------------
@@ -121,12 +124,13 @@ sensor:
 
   # ---------------------------------------------------------------------------
   # pH sensor source — A2
-  # Typical pH probe module: 0-3V output
+  # DFRobot analog + 5 V isolator can exceed 4.096 V (j5 era 1.6–3.2 V;
+  # live fault = rail 4.094 V). Prefer gain: 6.144 until raw sits mid-scale.
   # ---------------------------------------------------------------------------
   - platform: ads1115
     ads1115_id: ads
     multiplexer: 'A2_GND'
-    gain: 4.096
+    gain: 4.096   # change to 6.144 if raw pegs at ~4.09 V
     id: ads_ph
     name: "ADS pH Source"
     internal: true
@@ -294,7 +298,9 @@ pool_station:
         name: "Pool pH Calibrated"
       
       # Calibration: piecewise 3-point (pH 4, 7, 10 buffers)
-      # These are example values - replace with your actual calibration
+      # These are example volts (SEN0161-style: higher V → lower pH).
+      # Do NOT paste j5 Arduino ADC counts (328/498/658) as x — see
+      # docs/PH-J5-VS-POOL-STATION-ADS.md. Recapture on THIS ADS.
       calibration:
         type: piecewise
         precision: 2

@@ -4,7 +4,7 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 
 ## Table of Contents
 
-- [From j5_ha_bridge to pool_station](#from-j5_ha_bridge-to-pool_station)
+- [From j5_ha_bridge to pool_station](#from-j5_ha_bridge-to-pool_station) — details: [PH-J5-VS-POOL-STATION-ADS.md](PH-J5-VS-POOL-STATION-ADS.md)
 - [From pool-firmata-wifi (lambda-heavy) to pool_station](#from-pool-firmata-wifi-to-pool_station)
 - [Entity ID Stability](#entity-id-stability)
 - [Calibration NVS key (v0.7.16)](#calibration-nvs-key-v0716)
@@ -18,56 +18,106 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 
 ## From j5_ha_bridge to pool_station
 
-If you were using the Johnny-Five Home Assistant bridge (j5_ha_bridge) for pool sensor calibration, here's how to migrate:
+If you were using the Johnny-Five Home Assistant bridge
+([j5_ha_bridge](https://github.com/echavet/j5_ha_bridge)) for pool sensor
+calibration, **do not copy ADC calibration points into pool_station**.
 
-### j5_ha_bridge Calibration Options
+j5 X values are **Arduino ADC counts** (0–1023 on a 5 V Uno). pool_station X
+values are **ADS1115 volts**. Live pool-io (2026-09): NVS is a **2-point
+linear** `(1.602 V→4.0), (3.406 V→7.4)` while ADS raw ≈ **4.094 V** (gain
+4.096 **rail**). That line extrapolates to **pH ≈ 8.71**. j5’s 7.4 was
+**≈ 2.43 V** (`498 × 5/1023`), not 3.406 V. Full write-up:
 
-| j5_ha_bridge Option | pool_station Equivalent | Notes |
-|---------------------|------------------------|-------|
-| `scale: [min, max]` | `calibration: type: linear` + 2 points | Use piecewise for N-point |
-| `fsr.curve: [[x1,y1], ...]` | `calibration: points: [{x:, y:}]` | Same concept, YAML syntax |
-| `threshold: {high, low}` | `filters: value_min/value_max` | Clamp values |
-| `freq: 25` | `update_interval: 40ms` | Sampling rate |
-| `median: true` | `filters: filter_samples: 5` | Median window |
+**[PH-J5-VS-POOL-STATION-ADS.md](PH-J5-VS-POOL-STATION-ADS.md)**
 
-### Example Migration
+### j5_ha_bridge options (verified in MQTTSensor.js / config.yaml)
 
-**j5_ha_bridge (old)**:
-```javascript
-// In Johnny-Five sensor configuration
-{
-  pin: "A2",
-  freq: 25,
-  scale: [0, 14],
-  threshold: 0,
-  fsr: {
-    curve: [[0.5, 4.0], [1.5, 7.0], [2.5, 10.0]]
-  }
-}
+There is no `scale:`, no `fsr.curve`, and `freq` is **milliseconds** (not Hz).
+`threshold` is Johnny-Five’s ADC-count hysteresis for the `change` event, not
+a pH clamp.
+
+| j5_ha_bridge option | Meaning in j5 | pool_station equivalent |
+|---------------------|---------------|-------------------------|
+| `calibration_sets[].x_point` | Raw **ADC counts** | `calibration.points[].x` in **volts** (re-capture; do not reuse 328/498/658) |
+| `calibration_sets[].y_point` | Physical value (pH, bar, mV) | `calibration.points[].y` (same idea) |
+| `calibration_type: polynomial` | npm `regression.polynomial` | `calibration.type: polynomial` (or `piecewise`) |
+| `calibration_order` | Poly degree (j5 default **3**) | `calibration.order` (pool default **2**) |
+| `calibration_precision` | Significant digits of **coefficients** (j5 default 8) | `calibration.precision` = **output** rounding (default 2). Different meaning. |
+| `freq: 12000` | 12 **seconds** between J5 treatments | `update_interval: 12s` (example pH uses 60s) |
+| `threshold` | Min Δ**ADC** to emit `change` (J5 default 1) | No equivalent (channel publishes every throttle tick) |
+| `filter_samples` | Sliding median on successive `change` readings | `filters.filter_samples` (median on throttled samples) |
+| `max_jump` / `max_jump_streak` | Reject jump, accept new plateau after N | Same names — same idea |
+| `value_min` / `value_max` | **Reject** (keep last good) | **Clamp** (rewrites the value). Not the same. |
+| `publish_raw` / `publish_calibrated` | MQTT companions (raw = ADC) | `raw_sensor` (volts) / `calibrated_sensor` (pre-guard) |
+
+### Example Migration (pH)
+
+**j5_ha_bridge (old)** — Eric’s working Uno config (`freq` in ms, X = ADC):
+
+```yaml
+calibration_sets:
+  - set: PH
+    x_point: 328      # ADC counts, not volts
+    y_point: 4
+  - set: PH
+    x_point: 498
+    y_point: 7.4
+  - set: PH
+    x_point: 658
+    y_point: 10.01
+
+sensors:
+  - name: Sonde PH
+    pin: A5
+    unit: ph
+    freq: 12000
+    calibration_set: PH
+    calibration_type: polynomial
+    calibration_order: 2
+    calibration_precision: 20
+    filter_samples: 5
+    max_jump: 0.4
+    max_jump_streak: 5
+    value_min: 4.5
+    value_max: 9
+    publish_raw: true
+    publish_calibrated: true
 ```
 
-**pool_station (new)**:
+**pool_station (new)** — X must be **new** ADS volts from buffer capture.
+The numbers below are the example YAML only; replace them.
+
 ```yaml
 channels:
   ph:
     source_id: ads_ph
     name: "Pool pH"
-    update_interval: 40ms  # freq: 25 = 40ms
-    
+    update_interval: 60s
+
     calibration:
-      type: piecewise
+      type: piecewise          # or polynomial + order: 2
+      precision: 2             # output decimals, not j5 coefficient digits
       points:
-        - x: 0.5
-          y: 4.0
-        - x: 1.5
-          y: 7.0
-        - x: 2.5
-          y: 10.0
-    
+        - x: 2.03              # PLACEHOLDER volts — capture on THIS ADS
+          y: 4.01
+        - x: 1.50
+          y: 7.00
+        - x: 0.98
+          y: 10.00
+
     filters:
-      value_min: 0.0
-      value_max: 14.0
+      filter_samples: 5
+      max_jump: 0.4
+      max_jump_streak: 5
+      # Omitting value_min/value_max avoids clamp-vs-reject surprise.
+      # j5 used 4.5–9 as reject-and-hold, not clamp.
 ```
+
+Uno 5 V / 1023 translation of those ADC points (only valid if isolation is
+1:1 and the module still outputs the same voltage): 328→1.603 V, 498→2.434 V,
+658→3.216 V. That polarity (higher V → higher pH) is the **opposite** of the
+placeholder points above. Recalibrate with buffers; do not paste either set
+blindly.
 
 ---
 
@@ -458,5 +508,6 @@ After OTA update:
 ## See Also
 
 - [SENSOR-IDENTITY.md](SENSOR-IDENTITY.md) — Full address binding documentation
+- [PH-J5-VS-POOL-STATION-ADS.md](PH-J5-VS-POOL-STATION-ADS.md) — pH path j5 vs ADS (8.2 vs 7.4)
 - [README.md](../README.md) — Complete pool_station documentation
 - [CHANGELOG.md](../CHANGELOG.md) — Version history and migration notes
