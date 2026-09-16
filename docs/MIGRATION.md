@@ -23,9 +23,10 @@ If you were using the Johnny-Five Home Assistant bridge
 calibration, **do not copy ADC calibration points into pool_station**.
 
 j5 X values are **Arduino ADC counts** (0–1023 on a 5 V Uno). pool_station X
-values are **ADS1115 volts**. The same DFRobot hardware can read ~8.2 vs a
-7.4 reference meter after that domain change — see the full code-traced
-comparison:
+values are **ADS1115 volts**. Live pool-io (2026-09): NVS is a **2-point
+linear** `(1.602 V→4.0), (3.406 V→7.4)` while ADS raw ≈ **4.094 V** (gain
+4.096 **rail**). That line extrapolates to **pH ≈ 8.71**. j5’s 7.4 was
+**≈ 2.43 V** (`498 × 5/1023`), not 3.406 V. Full write-up:
 
 **[PH-J5-VS-POOL-STATION-ADS.md](PH-J5-VS-POOL-STATION-ADS.md)**
 
