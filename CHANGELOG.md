@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Docs — j5_ha_bridge vs pool_station+ADS pH path
+
+- Added [docs/PH-J5-VS-POOL-STATION-ADS.md](docs/PH-J5-VS-POOL-STATION-ADS.md):
+  code-traced comparison of Firmata ADC polynomial pH vs ADS1115 volt
+  calibration (8.2 vs reference 7.4).
+- Corrected [docs/MIGRATION.md](docs/MIGRATION.md) j5 section: j5 has no
+  `scale` / `fsr.curve`; `freq` is milliseconds; `x_point` is ADC counts;
+  `value_min`/`value_max` reject on j5 and clamp here.
+
 ## [0.8.1] - 2026-09-15
 
 ### Fixed — Restore Capturer draft UX entities after v0.8.0
