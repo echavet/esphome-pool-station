@@ -160,7 +160,7 @@ class AdsSourceValidatorTest(unittest.TestCase):
         self.assertEqual(ads.id_type_name(IdObj()), "ADS1115Sensor")
         self.assertEqual(ads.id_type_name(None), "")
 
-    def test_inherits_from_preferred_when_importable(self):
+    def test_inherits_from_true_accepted_when_importable(self):
         class FakeAds:
             pass
 
@@ -172,6 +172,19 @@ class AdsSourceValidatorTest(unittest.TestCase):
 
         class IdYes:
             type = TypeYes()
+
+        orig = ads._try_import_ads1115_sensor
+        ads._try_import_ads1115_sensor = lambda: FakeAds
+        try:
+            self.assertTrue(ads.source_id_is_ads1115_sensor(IdYes()))
+        finally:
+            ads._try_import_ads1115_sensor = orig
+
+    def test_inherits_false_falls_through_to_type_name(self):
+        """inherits_from False must not skip type-name / platform fallbacks."""
+
+        class FakeAds:
+            pass
 
         class TypeSpoof:
             _name = "ADS1115Sensor"
@@ -185,10 +198,134 @@ class AdsSourceValidatorTest(unittest.TestCase):
         orig = ads._try_import_ads1115_sensor
         ads._try_import_ads1115_sensor = lambda: FakeAds
         try:
-            self.assertTrue(ads.source_id_is_ads1115_sensor(IdYes()))
-            self.assertFalse(ads.source_id_is_ads1115_sensor(IdSpoof()))
+            self.assertTrue(ads.source_id_is_ads1115_sensor(IdSpoof()))
         finally:
             ads._try_import_ads1115_sensor = orig
+
+    def test_inherits_false_plus_platform_ads1115_ok(self):
+        class FakeAds:
+            pass
+
+        class TypeObj:
+            _name = "Sensor"
+
+            def inherits_from(self, cls):
+                return False
+
+        class IdObj:
+            id = "ads_ph"
+            type = TypeObj()
+
+        orig = ads._try_import_ads1115_sensor
+        ads._try_import_ads1115_sensor = lambda: FakeAds
+        try:
+            self.assertTrue(
+                ads.source_id_is_ads1115_sensor(IdObj(), platform="ads1115")
+            )
+            self.assertTrue(
+                ads.source_id_is_ads1115_sensor(
+                    IdObj(),
+                    sensor_entries=[{"id": "ads_ph", "platform": "ads1115"}],
+                )
+            )
+        finally:
+            ads._try_import_ads1115_sensor = orig
+
+    def test_inherits_from_throws_falls_through_to_platform(self):
+        class FakeAds:
+            pass
+
+        class TypeObj:
+            _name = "Sensor"
+
+            def inherits_from(self, cls):
+                raise RuntimeError("ADS1115Sensor not the declared ID type")
+
+        class IdObj:
+            id = "ads_orp"
+            type = TypeObj()
+
+        orig = ads._try_import_ads1115_sensor
+        ads._try_import_ads1115_sensor = lambda: FakeAds
+        try:
+            self.assertTrue(
+                ads.source_id_is_ads1115_sensor(IdObj(), platform="ads1115")
+            )
+        finally:
+            ads._try_import_ads1115_sensor = orig
+
+    def test_ads1115_source_plus_ads_ok(self):
+        class TypeObj:
+            _name = "Sensor"
+
+        class IdObj:
+            id = "ads_ph"
+            type = TypeObj()
+
+        entries = [
+            {"id": "ads_ph", "platform": "ads1115"},
+            {"id": "water_temp", "platform": "dallas"},
+        ]
+        source = IdObj()
+        self.assertTrue(ads.source_id_is_ads1115_sensor(source, sensor_entries=entries))
+        self.assertIsNone(
+            ads.ads_overlay_channel_error(
+                {"source_id": source, "ads": {"gain": 4.096}},
+                sensor_entries=entries,
+            )
+        )
+
+    def test_dallas_plus_ads_invalid(self):
+        class TypeObj:
+            _name = "Sensor"
+
+        class IdObj:
+            id = "water_temp"
+            type = TypeObj()
+
+        entries = [{"id": "water_temp", "platform": "dallas"}]
+        source = IdObj()
+        self.assertFalse(ads.source_id_is_ads1115_sensor(source, sensor_entries=entries))
+        err = ads.ads_overlay_channel_error(
+            {"source_id": source, "ads": {"gain": 4.096}},
+            sensor_entries=entries,
+        )
+        self.assertIsNotNone(err)
+        self.assertIn("ads1115", err.lower())
+        self.assertIn("overlay", err.lower())
+
+    def test_wifi_signal_plus_ads_invalid(self):
+        class TypeObj:
+            _name = "Sensor"
+
+        class IdObj:
+            id = "wifi_rssi"
+            type = TypeObj()
+
+        entries = [{"id": "wifi_rssi", "platform": "wifi_signal"}]
+        err = ads.ads_overlay_channel_error(
+            {"source_id": IdObj(), "ads": {"gain": 4.096}},
+            sensor_entries=entries,
+        )
+        self.assertIsNotNone(err)
+        self.assertFalse(
+            ads.source_id_is_ads1115_sensor(IdObj(), sensor_entries=entries)
+        )
+
+    def test_dallas_without_ads_ok(self):
+        class TypeObj:
+            _name = "Sensor"
+
+        class IdObj:
+            id = "water_temp"
+            type = TypeObj()
+
+        self.assertIsNone(
+            ads.ads_overlay_channel_error(
+                {"source_id": IdObj()},
+                sensor_entries=[{"id": "water_temp", "platform": "dallas"}],
+            )
+        )
 
     def test_source_id_falls_back_to_type_name_without_import(self):
         class TypeObj:
@@ -199,6 +336,28 @@ class AdsSourceValidatorTest(unittest.TestCase):
 
         self.assertTrue(ads.source_id_is_ads1115_sensor(IdObj()))
         self.assertFalse(ads.source_id_is_ads1115_sensor(None))
+
+    def test_sensor_platform_lookup_and_generic_type(self):
+        class IdObj:
+            id = "ads_pressure"
+
+        self.assertEqual(
+            ads.sensor_platform_for_id(
+                IdObj(),
+                [{"id": "ads_pressure", "platform": "ads1115"}],
+            ),
+            "ads1115",
+        )
+        self.assertTrue(ads.source_platform_is_ads1115("ads1115"))
+        self.assertTrue(ads.source_platform_is_ads1115("ADS1115"))
+        self.assertFalse(ads.source_platform_is_ads1115("fake_ads1115"))
+        self.assertFalse(ads.source_platform_is_ads1115("dallas"))
+        self.assertTrue(ads.is_generic_sensor_type_name("Sensor"))
+        self.assertTrue(ads.is_generic_sensor_type_name("esphome::sensor::Sensor"))
+        self.assertTrue(ads.is_generic_sensor_type_name("<esphome.codegen.MockType object>"))
+        self.assertFalse(ads.is_generic_sensor_type_name("DallasTemperatureSensor"))
+        self.assertEqual(ads.normalize_config_id(IdObj()), "ads_pressure")
+        self.assertEqual(ads.normalize_config_id("ads_ph"), "ads_ph")
 
 
 class AdsCodegenContractTest(unittest.TestCase):
@@ -298,11 +457,20 @@ class AdsCodegenContractTest(unittest.TestCase):
         self.assertIn("ADS1115_GAIN_6P144", header)
         self.assertIn("USE_ADS1115", header)
 
-    def test_validator_uses_inherits_from_first(self):
+    def test_validator_walks_core_config_not_only_inherits(self):
         with open(INIT_PATH, encoding="utf-8") as handle:
             source = handle.read()
-        self.assertIn("source_id_is_ads1115_sensor", source)
+        self.assertIn("FINAL_VALIDATE_SCHEMA", source)
+        self.assertIn("final_validate_ads_overlay", source)
+        self.assertIn("try_core_sensor_entries", source)
         self.assertIn("inherits_from(ADS1115Sensor)", source)
+        self.assertIn("ads_overlay_channel_error", source)
+        with open(HELPER_PATH, encoding="utf-8") as handle:
+            helper = handle.read()
+        self.assertIn("source_id_is_ads1115_sensor", helper)
+        self.assertIn("sensor_platform_for_id", helper)
+        # inherits False / exception must fall through (no early return False)
+        self.assertNotIn("except Exception:\n            return False", helper)
 
 
 class AdsGainRoundTripTest(unittest.TestCase):

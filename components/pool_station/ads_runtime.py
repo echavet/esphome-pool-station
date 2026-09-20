@@ -65,6 +65,16 @@ ADS1115_TYPE_MARKERS = (
     "ads1115::ADS1115Sensor",
 )
 
+# cv.use_id(sensor.Sensor) types compose-model IDs as these, never ADS1115Sensor.
+GENERIC_SENSOR_TYPE_NAMES = (
+    "Sensor",
+    "sensor.Sensor",
+    "sensor::Sensor",
+    "esphome::sensor::Sensor",
+)
+
+ADS1115_PLATFORM = "ads1115"
+
 ADS_OVERLAY_SOURCE_ERROR = (
     "ads: overlay requires source_id to be a native platform: ads1115 "
     "sensor (ADS1115Sensor). Non-ADS sources cannot use the overlay."
@@ -199,6 +209,101 @@ def source_type_is_ads1115_sensor(type_name):
     return name.endswith("::ADS1115Sensor") or name.endswith(".ADS1115Sensor")
 
 
+def is_generic_sensor_type_name(type_name):
+    """True for the compose-model ID type produced by cv.use_id(sensor.Sensor).
+
+    Also treats unknown/repr-like names as generic so channel-schema validation
+    can defer to FINAL_VALIDATE (CORE.config is complete then).
+    """
+    if not type_name:
+        return True
+    name = str(type_name)
+    if name in GENERIC_SENSOR_TYPE_NAMES:
+        return True
+    if name.startswith("<") or " object" in name or "MockType" in name:
+        return True
+    return name.endswith("::Sensor") and not source_type_is_ads1115_sensor(name)
+
+
+def source_platform_is_ads1115(platform):
+    """Exact YAML platform name — not a substring (rejects fake_ads1115)."""
+    if platform is None:
+        return False
+    return str(platform).strip().lower() == ADS1115_PLATFORM
+
+
+def normalize_config_id(obj):
+    """String id from an ESPHome ID object, mock, or YAML scalar."""
+    if obj is None:
+        return ""
+    if isinstance(obj, str):
+        return obj.strip()
+    for attr in ("id", "id_"):
+        value = getattr(obj, attr, None)
+        if isinstance(value, str) and value:
+            return value
+        if value is not None and not callable(value):
+            nested = getattr(value, "id", None)
+            if isinstance(nested, str) and nested:
+                return nested
+            text = str(value).strip()
+            if text:
+                return text
+    return str(obj).strip()
+
+
+def try_core_sensor_entries():
+    """Sensor dicts from ESPHome CORE.raw_config / CORE.config (empty off-host)."""
+    entries = []
+    try:
+        from esphome.core import CORE
+    except Exception:
+        return entries
+    seen = set()
+    for blob in (getattr(CORE, "raw_config", None), getattr(CORE, "config", None)):
+        if not isinstance(blob, dict):
+            continue
+        sensors = blob.get("sensor")
+        if sensors is None:
+            continue
+        if isinstance(sensors, dict):
+            sensors = [sensors]
+        try:
+            iterable = list(sensors)
+        except TypeError:
+            continue
+        for entry in iterable:
+            if not isinstance(entry, dict):
+                continue
+            marker = id(entry)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            entries.append(entry)
+    return entries
+
+
+def sensor_platform_for_id(source_id, sensor_entries=None):
+    """Return the YAML ``platform:`` for ``source_id``, or None if unknown."""
+    wanted = normalize_config_id(source_id)
+    if not wanted:
+        return None
+    if sensor_entries is None:
+        sensor_entries = try_core_sensor_entries()
+    if not sensor_entries:
+        return None
+    if isinstance(sensor_entries, dict):
+        sensor_entries = [sensor_entries]
+    for entry in sensor_entries:
+        if not isinstance(entry, dict):
+            continue
+        if normalize_config_id(entry.get("id")) == wanted:
+            platform = entry.get("platform")
+            if platform is not None:
+                return platform
+    return None
+
+
 def _try_import_ads1115_sensor():
     try:
         from esphome.components.ads1115.sensor import ADS1115Sensor
@@ -208,8 +313,15 @@ def _try_import_ads1115_sensor():
         return None
 
 
-def source_id_is_ads1115_sensor(source_id):
-    """Prefer inherits_from(ADS1115Sensor) when the ESPHome type is importable."""
+def source_id_is_ads1115_sensor(source_id, platform=None, sensor_entries=None):
+    """True if source_id is a native ADS1115 sensor.
+
+    ``inherits_from(ADS1115Sensor)`` is used only when it returns True.
+    False or an exception must fall through: ``cv.use_id(sensor.Sensor)``
+    types compose-model IDs as ``Sensor``, so inherits is False even for
+    a real ``platform: ads1115`` source. Next checks are type-name, then
+    the YAML platform from ``sensor_entries`` / CORE.config.
+    """
     if source_id is None:
         return False
     type_obj = getattr(source_id, "type", None)
@@ -217,10 +329,25 @@ def source_id_is_ads1115_sensor(source_id):
     ads_cls = _try_import_ads1115_sensor()
     if callable(inherits) and ads_cls is not None:
         try:
-            return bool(inherits(ads_cls))
+            if bool(inherits(ads_cls)):
+                return True
         except Exception:
-            return False
-    return source_type_is_ads1115_sensor(id_type_name(source_id))
+            pass
+    if source_type_is_ads1115_sensor(id_type_name(source_id)):
+        return True
+    if platform is None:
+        platform = sensor_platform_for_id(source_id, sensor_entries)
+    return source_platform_is_ads1115(platform)
+
+
+def ads_overlay_channel_error(channel, sensor_entries=None):
+    """Return ADS_OVERLAY_SOURCE_ERROR if ads: is set on a non-ADS source."""
+    if not channel or not channel.get("ads"):
+        return None
+    source = channel.get("source_id")
+    if source_id_is_ads1115_sensor(source, sensor_entries=sensor_entries):
+        return None
+    return ADS_OVERLAY_SOURCE_ERROR
 
 
 def id_type_name(source_id):
