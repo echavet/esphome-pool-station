@@ -39,6 +39,12 @@ static constexpr uint8_t MAX_JUMP_STREAK_MAX = 10;
 static constexpr uint32_t UPDATE_INTERVAL_MS_MIN = 1000;
 static constexpr uint32_t UPDATE_INTERVAL_MS_MAX = 3600000;
 
+/** NVS deferred flush: debounce period before writing to flash (ms).
+ *  Coalesces rapid HA changes into one save, reducing Wi-Fi starvation.
+ *  3 seconds balances responsiveness with flash wear and CPU blocking.
+ */
+static constexpr uint32_t NVS_FLUSH_DEBOUNCE_MS = 3000;
+
 /** HA number kind for Lot B filter / interval widgets (one C++ class). */
 enum FilterRuntimeNumberKind : uint8_t {
   FILTER_RT_SAMPLES = 0,

@@ -373,17 +373,25 @@ class CodegenContractTest(unittest.TestCase):
         self.assertIn("stamp_interval", save)
         self.assertIn("filters_persist_ && stamp_filters", save)
         self.assertIn("interval_persist_ && stamp_interval", save)
+        # remember_gain_at_cal_save flushes immediately (critical user action)
+        # v0.10.4 fix: preserves pending stamps so filter/interval changes aren't lost
         remember = _fn(source, "void PoolStationChannelSensor::remember_gain_at_cal_save")
-        self.assertIn("save_runtime_preferences()", remember)
+        self.assertIn("save_runtime_preferences(this->nvs_pending_stamp_filters_", remember)
         self.assertNotIn("save_runtime_preferences(true", remember)
+        # v0.10.4: deferred flush — apply_gain_runtime uses mark_nvs_dirty_
         apply_gain = _fn(source, "void PoolStationChannelSensor::apply_gain_runtime")
-        self.assertIn("save_runtime_preferences()", apply_gain)
+        self.assertIn("mark_nvs_dirty_(false, false)", apply_gain)
+        # v0.10.4: persist_filters_if_ / persist_interval_if_ use mark_nvs_dirty_
         persist_f = _fn(source, "void PoolStationChannelSensor::persist_filters_if_")
         persist_i = _fn(source, "void PoolStationChannelSensor::persist_interval_if_")
-        self.assertIn("save_runtime_preferences(true, false)", persist_f)
-        self.assertIn("save_runtime_preferences(false, true)", persist_i)
+        self.assertIn("mark_nvs_dirty_(true, false)", persist_f)
+        self.assertIn("mark_nvs_dirty_(false, true)", persist_i)
+        # v0.10.4: reset_filters_to_yaml uses mark_nvs_dirty_
         reset = _fn(source, "void PoolStationChannelSensor::reset_filters_to_yaml")
-        self.assertIn("save_runtime_preferences(this->filters_persist_, this->interval_persist_)", reset)
+        self.assertIn("mark_nvs_dirty_(this->filters_persist_, this->interval_persist_)", reset)
+        # flush_nvs_now_ calls save_runtime_preferences with accumulated stamps
+        flush = _fn(source, "void PoolStationChannelSensor::flush_nvs_now_")
+        self.assertIn("save_runtime_preferences(this->nvs_pending_stamp_filters_", flush)
 
     def test_median_skip_same_size_and_jump_skip_same(self):
         with open(CHANNEL_CPP, encoding="utf-8") as handle:

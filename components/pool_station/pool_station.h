@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/application.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -509,6 +510,12 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void persist_interval_if_(bool persist);
   void apply_nvs_filter_fields_(const ads_runtime::ChannelRuntimePrefsData &data);
 
+  // NVS deferred flush (v0.10.4): coalesce rapid changes into one save
+  void mark_nvs_dirty_(bool stamp_filters, bool stamp_interval);
+  void flush_nvs_if_idle_(uint32_t now);
+  void flush_nvs_now_();
+  void register_shutdown_hook_();
+
   bool ads_overlay_enabled_{false};
 #ifdef USE_ADS1115
   ads1115::ADS1115Sensor *ads_{nullptr};
@@ -542,6 +549,13 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   float yaml_value_max_{NAN};
   uint32_t yaml_update_interval_ms_{1000};
   std::vector<FilterRuntimeNumber *> filter_runtime_numbers_{};
+
+  // NVS deferred flush state (v0.10.4): coalesce rapid HA changes
+  bool nvs_dirty_{false};
+  uint32_t nvs_dirty_since_ms_{0};
+  bool nvs_pending_stamp_filters_{false};
+  bool nvs_pending_stamp_interval_{false};
+  bool nvs_shutdown_hook_registered_{false};
 };
 
 

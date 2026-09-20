@@ -444,12 +444,18 @@ void PoolStationChannelSensor::setup() {
              this->diagnostics_config_.noise_warn_sigma,
              this->diagnostics_config_.stuck_timeout_ms);
   }
+
+  // NVS deferred flush (v0.10.4): register shutdown hook for best-effort save
+  this->register_shutdown_hook_();
 }
 
 void PoolStationChannelSensor::loop() {
+  uint32_t now = millis();
   if (this->ads_overlay_enabled_) {
-    this->expire_saturation_hold_(millis());
+    this->expire_saturation_hold_(now);
   }
+  // NVS deferred flush (v0.10.4): save after idle debounce
+  this->flush_nvs_if_idle_(now);
 }
 
 void PoolStationChannelSensor::dump_config() {
@@ -674,8 +680,9 @@ void PoolStationChannelSensor::apply_gain_runtime(uint8_t gain_code, bool persis
   this->apply_ads_gain_to_source_();
   // Design §5.3: auto-save NVS on every persist apply (including first HA
   // apply of the YAML-same gain so NVS wins after reboot).
+  // v0.10.4: deferred flush — mark dirty instead of immediate save.
   if (persist) {
-    this->save_runtime_preferences();
+    this->mark_nvs_dirty_(false, false);
   }
   this->publish_ads_ui_();
   if (changed) {
@@ -776,7 +783,15 @@ void PoolStationChannelSensor::remember_gain_at_cal_save() {
     return;
   }
   this->gain_at_last_cal_save_ = this->gain_shadow_;
-  this->save_runtime_preferences();
+  // Calibration save is a critical user action — flush immediately.
+  // Do not defer: losing gain_at_last_cal_save would break mismatch detection.
+  // Preserve any pending stamps so filter/interval changes aren't lost.
+  this->save_runtime_preferences(this->nvs_pending_stamp_filters_,
+                                  this->nvs_pending_stamp_interval_);
+  // Clear pending dirty state since we just saved everything.
+  this->nvs_dirty_ = false;
+  this->nvs_pending_stamp_filters_ = false;
+  this->nvs_pending_stamp_interval_ = false;
   this->publish_gain_mismatch_();
   ESP_LOGI(TAG, "Channel %s: remembered ADS gain %s at calibration Save",
            this->get_channel_type_name(), ads_runtime::gain_code_to_label(this->gain_shadow_));
@@ -919,13 +934,15 @@ void PoolStationChannelSensor::publish_filter_ui_() {
 
 void PoolStationChannelSensor::persist_filters_if_(bool persist) {
   if (persist && this->filters_persist_) {
-    this->save_runtime_preferences(true, false);
+    // v0.10.4: deferred flush — mark dirty instead of immediate save.
+    this->mark_nvs_dirty_(true, false);
   }
 }
 
 void PoolStationChannelSensor::persist_interval_if_(bool persist) {
   if (persist && this->interval_persist_) {
-    this->save_runtime_preferences(false, true);
+    // v0.10.4: deferred flush — mark dirty instead of immediate save.
+    this->mark_nvs_dirty_(false, true);
   }
 }
 
@@ -972,6 +989,66 @@ void PoolStationChannelSensor::apply_nvs_filter_fields_(const ads_runtime::Chann
     ESP_LOGI(TAG, "Channel %s: loaded runtime update_interval %u ms from NVS",
              this->get_channel_type_name(), this->configured_interval_);
   }
+}
+
+// ============================================================================
+// NVS Deferred Flush (v0.10.4)
+// Coalesces rapid HA parameter changes into a single NVS write after idle.
+// ============================================================================
+
+void PoolStationChannelSensor::mark_nvs_dirty_(bool stamp_filters, bool stamp_interval) {
+  if (this->runtime_prefs_key_ == 0) {
+    return;
+  }
+  if (!this->nvs_dirty_) {
+    this->nvs_dirty_ = true;
+    this->nvs_dirty_since_ms_ = millis();
+  }
+  this->nvs_pending_stamp_filters_ = this->nvs_pending_stamp_filters_ || stamp_filters;
+  this->nvs_pending_stamp_interval_ = this->nvs_pending_stamp_interval_ || stamp_interval;
+}
+
+void PoolStationChannelSensor::flush_nvs_if_idle_(uint32_t now) {
+  if (!this->nvs_dirty_) {
+    return;
+  }
+  if ((now - this->nvs_dirty_since_ms_) < ads_runtime::NVS_FLUSH_DEBOUNCE_MS) {
+    return;
+  }
+  this->flush_nvs_now_();
+}
+
+void PoolStationChannelSensor::flush_nvs_now_() {
+  if (!this->nvs_dirty_) {
+    return;
+  }
+  ESP_LOGI(TAG, "Channel %s: flushing NVS prefs (filters=%s, interval=%s)",
+           this->get_channel_type_name(),
+           this->nvs_pending_stamp_filters_ ? "yes" : "no",
+           this->nvs_pending_stamp_interval_ ? "yes" : "no");
+  this->save_runtime_preferences(this->nvs_pending_stamp_filters_,
+                                  this->nvs_pending_stamp_interval_);
+  this->nvs_dirty_ = false;
+  this->nvs_pending_stamp_filters_ = false;
+  this->nvs_pending_stamp_interval_ = false;
+}
+
+void PoolStationChannelSensor::register_shutdown_hook_() {
+  if (this->nvs_shutdown_hook_registered_) {
+    return;
+  }
+  if (this->runtime_prefs_key_ == 0) {
+    return;
+  }
+  PoolStationChannelSensor *self = this;
+  App.register_shutdown_hook([self]() {
+    if (self->nvs_dirty_) {
+      ESP_LOGI(TAG, "Channel %s: shutdown — flushing pending NVS prefs",
+               self->get_channel_type_name());
+      self->flush_nvs_now_();
+    }
+  });
+  this->nvs_shutdown_hook_registered_ = true;
 }
 
 void PoolStationChannelSensor::apply_filter_samples_runtime(uint8_t n, bool persist) {
@@ -1067,7 +1144,8 @@ void PoolStationChannelSensor::reset_filters_to_yaml() {
   this->apply_value_max_runtime(this->yaml_value_max_, false);
   this->apply_update_interval_runtime(this->yaml_update_interval_ms_, false);
   if (this->filters_persist_ || this->interval_persist_) {
-    this->save_runtime_preferences(this->filters_persist_, this->interval_persist_);
+    // v0.10.4: deferred flush — mark dirty instead of immediate save.
+    this->mark_nvs_dirty_(this->filters_persist_, this->interval_persist_);
   }
   this->publish_filter_ui_();
 }
