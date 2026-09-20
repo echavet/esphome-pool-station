@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.9.0 (Lot A — gain ADS runtime + saturation, compose)  
+> Version: 0.10.0 (Lot B — filtres / intervalle canal runtime, compose)  
 > Date: 2026-09-20  
 > Auteur: @echavet
 
@@ -60,6 +60,7 @@
 | F-FLT-03 | `streak` : validation par séquence stable | 3 | ✅ Done |
 | F-FLT-04 | `min/max` : clamp des valeurs hors plage | 3 | ✅ Done |
 | F-FLT-05 | Publication raw et calibrated séparément | 3 | ✅ Done |
+| F-FLT-06 | Numbers HA opt-in (`filters.runtime`) + intervalle canal ; NVS sidecar Lot A | B | ✅ Done |
 
 ### F-DIAG : Diagnostics
 
@@ -126,6 +127,7 @@
 | F-HA-06 | Draft/Save workflow (Save=commit, Discard, draft_pending, draft_invalid) | 7 | ✅ Done |
 | F-HA-07 | Add/remove calibration points | 7 | ✅ Done |
 | F-HA-08 | Select gain ADS runtime + alarme saturation ≥ 98 % FSR (opt-in `ads:`) | A | ✅ Done |
+| F-HA-09 | Numbers filtres Lot 3 + `update_interval` canal (opt-in `filters.runtime`) | B | ✅ Done |
 
 ### F-INT : Détection d'interférences (station)
 
@@ -189,8 +191,8 @@ Indicateurs de *suspicion*, pas un diagnostic chimique. Opt-in YAML `interferenc
 | 6 | Gates/campaigns | ✅ Done |
 | 7 | HA polish, runtime algo select, draft/Save dirty UX | ✅ Done |
 | **8** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ Done |
-| **A** | **Runtime ADS gain + saturation (compose, pas ownership)** | ✅ **Current** |
-| **B** | Filtres Lot 3 + intervalle canal HA-tunables | Plus tard |
+| **A** | **Runtime ADS gain + saturation (compose, pas ownership)** | ✅ Done |
+| **B** | **Filtres Lot 3 + intervalle canal HA-tunables** | ✅ **Current** |
 | **C** | Ownership / rewrite driver ADS | NO-GO |
 
 ## 8. Critères d'acceptation

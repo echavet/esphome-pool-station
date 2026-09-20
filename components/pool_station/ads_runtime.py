@@ -72,6 +72,51 @@ ADS_OVERLAY_SOURCE_ERROR = (
 RUNTIME_PREFS_MAGIC = 0xA0511115
 CALIBRATION_PREFS_MAGIC = 0xCA110005
 
+RT_FLAG_HAS_VMIN = 0x01
+RT_FLAG_HAS_VMAX = 0x02
+RT_FLAG_HAS_GAIN = 0x04
+
+FILTER_SAMPLES_MAX = 20
+MAX_JUMP_STREAK_MIN = 1
+MAX_JUMP_STREAK_MAX = 10
+UPDATE_INTERVAL_S_MIN = 1
+UPDATE_INTERVAL_S_MAX = 3600
+UPDATE_INTERVAL_MS_MIN = 1000
+UPDATE_INTERVAL_MS_MAX = 3600 * 1000
+
+# Must match ads_runtime.h FilterRuntimeNumberKind
+FILTER_RT_SAMPLES = 0
+FILTER_RT_MAX_JUMP = 1
+FILTER_RT_MAX_JUMP_STREAK = 2
+FILTER_RT_VALUE_MIN = 3
+FILTER_RT_VALUE_MAX = 4
+FILTER_RT_UPDATE_INTERVAL_S = 5
+
+# Design §4.1: max_jump number step by channel (pH 0.05, ORP 1, bar 0.01)
+FILTER_NUMBER_SPECS = {
+    "pressure": {
+        "jump_step": 0.01,
+        "jump_max": 20.0,
+        "value_min": -1.0,
+        "value_max": 20.0,
+        "clamp_step": 0.01,
+    },
+    "ph": {
+        "jump_step": 0.05,
+        "jump_max": 14.0,
+        "value_min": 0.0,
+        "value_max": 14.0,
+        "clamp_step": 0.05,
+    },
+    "orp": {
+        "jump_step": 1.0,
+        "jump_max": 2000.0,
+        "value_min": -2000.0,
+        "value_max": 2000.0,
+        "clamp_step": 1.0,
+    },
+}
+
 # Packed sidecar: 4 + 6 + 2 pad + 3*4 + 4 + 4 = 32 (floats at offset 12).
 CHANNEL_RUNTIME_PREFS_SIZE = 32
 CHANNEL_RUNTIME_PREFS_FLOAT_OFFSET = 12
@@ -189,6 +234,154 @@ def id_type_name(source_id):
         if isinstance(value, str) and value:
             return value
     return str(type_obj)
+
+
+def is_managed_u8(value):
+    return value is not None and int(value) != GAIN_UNMANAGED
+
+
+def is_managed_float(value):
+    if value is None:
+        return False
+    try:
+        return not math.isnan(value)
+    except TypeError:
+        return True
+
+
+def is_managed_interval_ms(ms):
+    return ms is not None and int(ms) != 0
+
+
+def clamp_filter_samples(n):
+    n = int(n)
+    if n < 0:
+        return 0
+    if n > FILTER_SAMPLES_MAX:
+        return FILTER_SAMPLES_MAX
+    return n
+
+
+def clamp_max_jump_streak(s):
+    s = int(s)
+    if s < MAX_JUMP_STREAK_MIN:
+        return MAX_JUMP_STREAK_MIN
+    if s > MAX_JUMP_STREAK_MAX:
+        return MAX_JUMP_STREAK_MAX
+    return s
+
+
+def clamp_max_jump(j):
+    j = float(j)
+    if math.isnan(j) or j < 0.0:
+        return 0.0
+    return j
+
+
+def clamp_update_interval_ms(ms):
+    ms = int(ms)
+    if ms < UPDATE_INTERVAL_MS_MIN:
+        return UPDATE_INTERVAL_MS_MIN
+    if ms > UPDATE_INTERVAL_MS_MAX:
+        return UPDATE_INTERVAL_MS_MAX
+    return ms
+
+
+def merge_nvs_filters(yaml_filters, nvs, persist=True):
+    """YAML seeds; NVS wins per managed field when persist is on.
+
+    Unmanaged sentinels (0xFF / NAN / interval 0) keep the YAML seed so a
+    Lot A-only sidecar does not wipe Lot 3 filter defaults.
+    """
+    out = dict(yaml_filters)
+    if not persist or not nvs:
+        return out
+    if is_managed_u8(nvs.get("filter_samples")):
+        out["filter_samples"] = clamp_filter_samples(nvs["filter_samples"])
+    if is_managed_float(nvs.get("max_jump")):
+        out["max_jump"] = clamp_max_jump(nvs["max_jump"])
+    if is_managed_u8(nvs.get("max_jump_streak")):
+        out["max_jump_streak"] = clamp_max_jump_streak(nvs["max_jump_streak"])
+    flags = int(nvs.get("flags", 0))
+    if flags & RT_FLAG_HAS_VMIN:
+        out["value_min"] = nvs.get("value_min")
+    if flags & RT_FLAG_HAS_VMAX:
+        out["value_max"] = nvs.get("value_max")
+    if is_managed_interval_ms(nvs.get("update_interval_ms")):
+        out["update_interval_ms"] = clamp_update_interval_ms(nvs["update_interval_ms"])
+    return out
+
+
+def pack_runtime_prefs(fields):
+    """Pack ChannelRuntimePrefsData with the Lot A/B 32-byte layout."""
+    import struct
+
+    return struct.pack(
+        CHANNEL_RUNTIME_PREFS_FORMAT,
+        int(fields.get("magic", RUNTIME_PREFS_MAGIC)),
+        int(fields.get("version", 1)),
+        int(fields.get("ads_gain", GAIN_UNMANAGED)),
+        int(fields.get("ads_sps", GAIN_UNMANAGED)),
+        int(fields.get("filter_samples", GAIN_UNMANAGED)),
+        int(fields.get("max_jump_streak", GAIN_UNMANAGED)),
+        int(fields.get("flags", 0)),
+        float(fields.get("max_jump", math.nan)),
+        float(fields.get("value_min", math.nan)),
+        float(fields.get("value_max", math.nan)),
+        int(fields.get("update_interval_ms", 0)),
+        int(fields.get("gain_at_last_cal_save", GAIN_UNMANAGED)),
+        0,
+        0,
+        0,
+    )
+
+
+def unpack_runtime_prefs(blob):
+    """Unpack a 32-byte sidecar. Keys match ChannelRuntimePrefsData."""
+    import struct
+
+    unpacked = struct.unpack(CHANNEL_RUNTIME_PREFS_FORMAT, blob)
+    return {
+        "magic": unpacked[0],
+        "version": unpacked[1],
+        "ads_gain": unpacked[2],
+        "ads_sps": unpacked[3],
+        "filter_samples": unpacked[4],
+        "max_jump_streak": unpacked[5],
+        "flags": unpacked[6],
+        "max_jump": unpacked[7],
+        "value_min": unpacked[8],
+        "value_max": unpacked[9],
+        "update_interval_ms": unpacked[10],
+        "gain_at_last_cal_save": unpacked[11],
+    }
+
+
+class SlidingWindow:
+    """Python mirror of channel_filter SlidingWindow (set_size clears)."""
+
+    def __init__(self):
+        self.size = 0
+        self.head = 0
+        self.count = 0
+        self.buffer = []
+
+    def set_size(self, size):
+        self.size = int(size)
+        self.buffer = [math.nan] * self.size
+        self.head = 0
+        self.count = 0
+
+    def push(self, value):
+        if self.size == 0:
+            return
+        self.buffer[self.head] = value
+        self.head = (self.head + 1) % self.size
+        if self.count < self.size:
+            self.count += 1
+
+    def is_full(self):
+        return self.count >= self.size and self.size > 0
 
 
 def ads_overlay_source_error(has_ads_block, source_type_name):

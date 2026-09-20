@@ -1,4 +1,4 @@
-# Pool Station — Example Configuration (Lot 8 + Lot A)
+# Pool Station — Example Configuration (Lot 8 + Lot A + Lot B)
 # 
 # This configuration demonstrates Lots 2-8 features:
 #   - N-point calibration with multiple algorithms
@@ -16,6 +16,7 @@
 #   - Lot 7: Draft/Save workflow
 #   - Lot 8: Station-level interference detection (orp↔pressure, ph↔orp)
 #   - Lot A: Runtime ADS gain select + saturation alarm (opt-in ads:)
+#   - Lot B: Runtime Lot 3 filters + channel update_interval (opt-in filters.runtime)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -299,6 +300,10 @@ pool_station:
       accuracy_decimals: 2
       icon: "mdi:ph"
       update_interval: 60s
+      # Lot B: HA-tunable channel throttle (seconds). Cal-mode stays ~1s.
+      # Does not change the ADS source poll (still 1s in this example).
+      update_interval_number:
+        name: "Pool pH Interval (s)"
       
       # Lot A: HA-tunable gain. A 4.094 V rail @ 4.096 is 99.95 % FSR —
       # saturated would be ON; switch to 6.144 from HA without OTA.
@@ -348,6 +353,22 @@ pool_station:
         max_jump_streak: 3       # Accept new plateau after 3 consistent readings
         value_min: 0.0           # Clamp to valid pH range
         value_max: 14.0
+        # Lot B: HA numbers + NVS sidecar (same ps-md5-rt-v1 as Lot A).
+        # Keep name: for stable HA entity IDs. reset_yaml reloads seeds.
+        runtime:
+          persist: true
+          filter_samples:
+            name: "Pool pH Median Samples"
+          max_jump:
+            name: "Pool pH Max Jump"
+          max_jump_streak:
+            name: "Pool pH Jump Streak"
+          value_min:
+            name: "Pool pH Clamp Min"
+          value_max:
+            name: "Pool pH Clamp Max"
+          reset_yaml_button:
+            name: "Pool pH Filters YAML"
       
       # Diagnostics (Lot 4): Full noise/stuck/range monitoring
       # These sensors and flags are opt-in (only created if declared)
@@ -453,6 +474,8 @@ pool_station:
       accuracy_decimals: 0
       icon: "mdi:flash"
       update_interval: 60s
+      update_interval_number:
+        name: "Pool ORP Interval (s)"
 
       ads:
         gain: 6.144
@@ -490,6 +513,20 @@ pool_station:
         max_jump_streak: 4       # Accept new level after 4 consistent readings
         value_min: -500.0        # Reasonable ORP range
         value_max: 1000.0
+        runtime:
+          persist: true
+          filter_samples:
+            name: "Pool ORP Median Samples"
+          max_jump:
+            name: "Pool ORP Max Jump"
+          max_jump_streak:
+            name: "Pool ORP Jump Streak"
+          value_min:
+            name: "Pool ORP Clamp Min"
+          value_max:
+            name: "Pool ORP Clamp Max"
+          reset_yaml_button:
+            name: "Pool ORP Filters YAML"
       
       # Diagnostics (Lot 4): ORP monitoring with appropriate thresholds
       diagnostics:

@@ -35,6 +35,9 @@ CalibrationSaveButton = pool_station_ns.class_(
 AdsResetYamlButton = pool_station_ns.class_(
     "AdsResetYamlButton", button.Button, cg.Component
 )
+FiltersResetYamlButton = pool_station_ns.class_(
+    "FiltersResetYamlButton", button.Button, cg.Component
+)
 
 # Configuration keys
 CONF_CHANNEL = "channel"

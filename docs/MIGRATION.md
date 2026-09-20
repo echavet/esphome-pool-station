@@ -13,6 +13,7 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 - [Restore Capturer draft entities (v0.8.1)](#restore-capturer-draft-entities-v081)
 - [Interference detection (v0.8.0)](#interference-detection-v080)
 - [Runtime ADS gain — Lot A (v0.9.0)](#runtime-ads-gain-lot-a-v090)
+- [Runtime filters — Lot B (v0.10.0)](#runtime-filters-lot-b-v0100)
 - [SENSOR-IDENTITY Checklist Before OTA](#sensor-identity-checklist-before-ota)
 
 ---
@@ -429,6 +430,66 @@ Rules:
 Product note: if « ADC saturé » is ON, Capturer X values are **ceilings**,
 not measurements. Widen the PGA (usually `6.144` for a 0–5 V isolator) or
 fix the wiring, **then** recapture.
+
+---
+
+## Runtime filters — Lot B (v0.10.0)
+
+Opt-in. YAML without `filters.runtime` / `update_interval_number` is
+unchanged (no new entities). Lot 3 `filters:` seeds still apply.
+
+HA numbers call the existing Lot 3 setters **and** resize the median
+window / reset the jump guard. This is **not** calibration: Capturer
+draft is not dirtied, Save does not write filters, and Calibration Mode
+does **not** lock the numbers (median/jump are already bypassed).
+
+```yaml
+pool_station:
+  channels:
+    ph:
+      source_id: ads_ph
+      update_interval: 60s
+      update_interval_number:
+        name: "pH Intervalle (s)"     # keep name: for stable HA entity IDs
+      filters:
+        filter_samples: 5             # YAML seed; NVS wins after HA apply
+        max_jump: 0.5
+        max_jump_streak: 3
+        value_min: 0.0                # clamp (not j5 last-good reject)
+        value_max: 14.0
+        runtime:
+          persist: true               # default true if runtime: is present
+          filter_samples:
+            name: "pH Échantillons médiane"
+          max_jump:
+            name: "pH Saut max"
+          max_jump_streak:
+            name: "pH Streak saut"
+          value_min:
+            name: "pH Clamp min"
+          value_max:
+            name: "pH Clamp max"
+          reset_yaml_button:
+            name: "pH Filtres YAML"
+```
+
+Rules:
+
+- **Same sidecar as Lot A** (`ps-md5-rt-v1`, magic `0xA0511115`). A Lot A
+  blob with unmanaged filter fields (`0xFF` / `NAN` / interval `0`) does
+  not override YAML filters. Calibration magic `0xCA110005` is **not**
+  bumped — no forced recapture.
+- After a HA change, **NVS wins** over a later YAML `filters:` edit.
+  Use `reset_yaml_button` to reload the YAML seeds.
+- `filter_samples` resize **clears** the median window; raw is published
+  until the window is full again (same as boot).
+- `max_jump: 0` disables the jump guard. Lot 8 coincident-jump still
+  sees **pre-guard** compensated samples.
+- `update_interval_number` is the channel throttle only. Calibration
+  Mode still forces ~1 s. The ADS source poll is **not** changed (MVP).
+- `value_min` / `value_max` stay **clamp**, not j5 reject.
+- Filters are outside Capturer: changing a number never calls
+  `commit_draft` / `discard_draft`.
 
 ---
 

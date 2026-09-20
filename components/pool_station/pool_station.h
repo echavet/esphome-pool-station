@@ -107,6 +107,8 @@ class AdsGainSelect;
 class AdsSaturatedBinarySensor;
 class AdsGainMismatchSensor;
 class AdsResetYamlButton;
+class FilterRuntimeNumber;
+class FiltersResetYamlButton;
 
 /**
  * Main pool_station component.
@@ -386,6 +388,26 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void save_runtime_preferences();
   void remember_gain_at_cal_save();
 
+  // Lot B: filter / interval overlay (opt-in). Outside Capturer draft/Save.
+  // Distinct from codegen set_filter_* which do not resize the median window.
+  void set_filters_persist(bool persist) { this->filters_persist_ = persist; }
+  void set_interval_persist(bool persist) { this->interval_persist_ = persist; }
+  void register_filter_runtime_number(FilterRuntimeNumber *num);
+  void apply_filter_samples_runtime(uint8_t n, bool persist = true);
+  void apply_max_jump_runtime(float j, bool persist = true);
+  void apply_max_jump_streak_runtime(uint8_t s, bool persist = true);
+  void apply_value_min_runtime(float v, bool persist = true);
+  void apply_value_max_runtime(float v, bool persist = true);
+  void apply_update_interval_runtime(uint32_t ms, bool persist = true);
+  void reset_filters_to_yaml();
+
+  uint8_t get_filter_samples() const { return this->filter_config_.filter_samples; }
+  float get_max_jump() const { return this->filter_config_.max_jump; }
+  uint8_t get_max_jump_streak() const { return this->filter_config_.max_jump_streak; }
+  float get_value_min() const { return this->filter_config_.value_min; }
+  float get_value_max() const { return this->filter_config_.value_max; }
+  uint32_t get_configured_interval_ms() const { return this->configured_interval_; }
+
   float get_fsr_volts() const;
   float get_fsr_percent(float raw_v) const;
   bool is_adc_saturated(float raw_v) const;
@@ -477,6 +499,13 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void expire_saturation_hold_(uint32_t now);
   void publish_ads_ui_();
   void publish_gain_mismatch_();
+  void snapshot_yaml_filter_seeds_();
+  void sync_median_window_();
+  void sync_jump_guard_(bool reset);
+  void publish_filter_ui_();
+  void persist_filters_if_(bool persist);
+  void persist_interval_if_(bool persist);
+  void apply_nvs_filter_fields_(const ads_runtime::ChannelRuntimePrefsData &data);
 
   bool ads_overlay_enabled_{false};
 #ifdef USE_ADS1115
@@ -500,6 +529,17 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   AdsSaturatedBinarySensor *saturated_sensor_{nullptr};
   sensor::Sensor *fsr_percent_sensor_{nullptr};
   AdsGainMismatchSensor *gain_mismatch_sensor_{nullptr};
+
+  // Lot B: YAML seeds + HA numbers. NVS sidecar is the Lot A blob.
+  bool filters_persist_{false};
+  bool interval_persist_{false};
+  uint8_t yaml_filter_samples_{0};
+  uint8_t yaml_max_jump_streak_{3};
+  float yaml_max_jump_{0.0f};
+  float yaml_value_min_{NAN};
+  float yaml_value_max_{NAN};
+  uint32_t yaml_update_interval_ms_{1000};
+  std::vector<FilterRuntimeNumber *> filter_runtime_numbers_{};
 };
 
 

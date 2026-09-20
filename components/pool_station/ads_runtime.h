@@ -28,14 +28,30 @@ static constexpr float SAT_ON_DEFAULT = 0.98f;
 static constexpr float SAT_OFF_DEFAULT = 0.95f;
 static constexpr uint32_t SAT_HOLD_MS_DEFAULT = 15000;
 
-/** flags: bit0 has_vmin, bit1 has_vmax, bit2 has_gain (Lot A). */
+/** flags: bit0 has_vmin, bit1 has_vmax, bit2 has_gain (Lot A). Lot B uses 0xFF / NAN / 0 sentinels. */
 static constexpr uint8_t RT_FLAG_HAS_VMIN = 0x01;
 static constexpr uint8_t RT_FLAG_HAS_VMAX = 0x02;
 static constexpr uint8_t RT_FLAG_HAS_GAIN = 0x04;
 
+static constexpr uint8_t FILTER_SAMPLES_MAX = 20;
+static constexpr uint8_t MAX_JUMP_STREAK_MIN = 1;
+static constexpr uint8_t MAX_JUMP_STREAK_MAX = 10;
+static constexpr uint32_t UPDATE_INTERVAL_MS_MIN = 1000;
+static constexpr uint32_t UPDATE_INTERVAL_MS_MAX = 3600000;
+
+/** HA number kind for Lot B filter / interval widgets (one C++ class). */
+enum FilterRuntimeNumberKind : uint8_t {
+  FILTER_RT_SAMPLES = 0,
+  FILTER_RT_MAX_JUMP = 1,
+  FILTER_RT_MAX_JUMP_STREAK = 2,
+  FILTER_RT_VALUE_MIN = 3,
+  FILTER_RT_VALUE_MAX = 4,
+  FILTER_RT_UPDATE_INTERVAL_S = 5,
+};
+
 /**
  * Runtime sidecar (Lot A writes gain + flags + gain_at_last_cal_save).
- * Lot B may fill filter/interval fields. 0xFF / NAN = unmanaged.
+ * Lot B fills filter/interval fields. 0xFF / NAN / interval 0 = unmanaged.
  *
  * Packed but 4-byte aligned after the uint8 header: unaligned floats
  * fault on ESP32-C3/C6. pad_align_[2] makes sizeof == 32 (no production
@@ -165,6 +181,49 @@ inline bool saturation_hysteresis(float abs_raw, float fsr_v, float sat_on, floa
 inline bool saturation_hold_expired(uint32_t now_ms, uint32_t last_on_ms, uint32_t hold_ms) {
   return (now_ms - last_on_ms) >= hold_ms;
 }
+
+inline uint8_t clamp_filter_samples(int n) {
+  if (n < 0) {
+    return 0;
+  }
+  if (n > FILTER_SAMPLES_MAX) {
+    return FILTER_SAMPLES_MAX;
+  }
+  return static_cast<uint8_t>(n);
+}
+
+inline uint8_t clamp_max_jump_streak(int s) {
+  if (s < static_cast<int>(MAX_JUMP_STREAK_MIN)) {
+    return MAX_JUMP_STREAK_MIN;
+  }
+  if (s > static_cast<int>(MAX_JUMP_STREAK_MAX)) {
+    return MAX_JUMP_STREAK_MAX;
+  }
+  return static_cast<uint8_t>(s);
+}
+
+inline float clamp_max_jump(float j) {
+  if (std::isnan(j) || j < 0.0f) {
+    return 0.0f;
+  }
+  return j;
+}
+
+inline uint32_t clamp_update_interval_ms(uint32_t ms) {
+  if (ms < UPDATE_INTERVAL_MS_MIN) {
+    return UPDATE_INTERVAL_MS_MIN;
+  }
+  if (ms > UPDATE_INTERVAL_MS_MAX) {
+    return UPDATE_INTERVAL_MS_MAX;
+  }
+  return ms;
+}
+
+inline bool is_managed_u8(uint8_t value) { return value != GAIN_UNMANAGED; }
+
+inline bool is_managed_float(float value) { return !std::isnan(value); }
+
+inline bool is_managed_interval_ms(uint32_t ms) { return ms != 0; }
 
 inline void init_unmanaged(ChannelRuntimePrefsData *data) {
   if (data == nullptr) {

@@ -21,6 +21,7 @@
 - **Brand agnostic**: works with any analog pH/ORP probe
 - **Interference flags**: coincident ORP/pressure jumps, shared pH/ORP noise (Lot 8)
 - **Runtime ADS gain**: change PGA from Home Assistant without OTA; saturation alarm at ~98 % FSR (Lot A)
+- **Runtime filters**: HA-tunable median / jump / clamp / channel interval without OTA (Lot B)
 
 Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.com/echavet/pool-firmata-wifi).
 
@@ -38,8 +39,38 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 | **HA Polish** | 7 | ✅ Done | Runtime algo select, add/remove points, draft/Save |
 | **Interference Detection** | 8 | ✅ Done | Station-level coincident jump / shared noise / optional pH↔Tw |
 | **Runtime ADS gain** | A | ✅ Done | HA PGA select, saturation ≥98 % FSR, sidecar NVS (compose) |
+| **Runtime filters** | B | ✅ Done | HA numbers for Lot 3 filters + channel `update_interval` (compose) |
 
-## Current Status — Lot A (v0.9.0)
+## Current Status — Lot B (v0.10.0)
+
+**Lot B** — Runtime Lot 3 filters + channel interval (opt-in `filters.runtime`):
+- ✅ HA `number` for `filter_samples` / `max_jump` / `max_jump_streak` / clamp
+- ✅ `update_interval_number` (channel throttle; cal-mode ~1 s stays prior)
+- ✅ Median `set_size()` on apply (window re-fills; same as boot)
+- ✅ Same sidecar NVS `ps-md5-rt-v1` as Lot A — cal magic `0xCA110005` unchanged
+- ✅ Filters stay **outside** Capturer draft/Save (no dirty)
+- ✅ Lot 8 still sees pre-`max_jump` compensated samples
+- ❌ Lot C (ADS ownership) remains NO-GO
+
+Without `filters.runtime` the channel is unchanged. See [MIGRATION](docs/MIGRATION.md#runtime-filters-lot-b-v0100).
+
+```yaml
+channels:
+  ph:
+    update_interval: 60s
+    update_interval_number:
+      name: "pH Intervalle (s)"
+    filters:
+      filter_samples: 5
+      max_jump: 0.5
+      runtime:
+        filter_samples:
+          name: "pH Échantillons médiane"
+        max_jump:
+          name: "pH Saut max"
+        reset_yaml_button:
+          name: "pH Filtres YAML"
+```
 
 **Lot A** — Runtime ADS1115 gain + saturation (opt-in `ads:` on a channel):
 - ✅ HA `select` for PGA (`6.144` … `0.256`) on pH / ORP / pressure
@@ -48,7 +79,6 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 - ✅ Soft-lock while Calibration Mode is ON; Save refused if raw is at the rail
 - ✅ Sidecar NVS `ps-md5-rt-v1` — calibration magic `0xCA110005` unchanged
 - ✅ Changing gain does **not** rescale calibration volts
-- ❌ Lot B (dynamic filters) and Lot C (ADS ownership) are not in this release
 
 Without `ads:` the channel is unchanged. See [MIGRATION](docs/MIGRATION.md#runtime-ads-gain-lot-a-v090).
 
@@ -775,7 +805,7 @@ Example entities for pH channel:
 
 - [CDC (Cahier des Charges)](docs/POOL-STATION-CDC.md) — Full requirements specification
 - [SENSOR-IDENTITY](docs/SENSOR-IDENTITY.md) — Anti-swap address binding table
-- [DESIGN-RUNTIME-ADS-AND-FILTERS](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) — Lot A implemented in v0.9.0; Lot B later; Lot C NO-GO
+- [DESIGN-RUNTIME-ADS-AND-FILTERS](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) — Lot A v0.9.0 + Lot B v0.10.0 implemented; Lot C NO-GO
 - [CHANGELOG](CHANGELOG.md) — Version history
 - [Examples](examples/) — YAML configuration examples
 
