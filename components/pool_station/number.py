@@ -69,7 +69,8 @@ CALIBRATION_POINT_X_SCHEMA = number.number_schema(
     cv.Optional(CONF_MAX_VALUE, default=10.0): cv.float_,
     cv.Optional(CONF_STEP, default=0.001): cv.positive_float,
     cv.Optional(CONF_UNIT_OF_MEASUREMENT, default="V"): cv.string,
-    cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+    # cv.enum → NUMBER_MODE_BOX; a raw string mode fails to compile on 2026.4.3.
+    cv.Optional(CONF_MODE, default="BOX"): cv.enum(number.NUMBER_MODES, upper=True),
 })
 
 # Schema for calibration point Y number (calibrated value)
@@ -86,7 +87,7 @@ CALIBRATION_POINT_Y_SCHEMA = number.number_schema(
     cv.Optional(CONF_MAX_VALUE, default=1000.0): cv.float_,
     cv.Optional(CONF_STEP, default=0.01): cv.positive_float,
     cv.Optional(CONF_UNIT_OF_MEASUREMENT): cv.string,
-    cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+    cv.Optional(CONF_MODE, default="BOX"): cv.enum(number.NUMBER_MODES, upper=True),
 })
 
 # Schema for DFRobot mid_mv number
@@ -102,7 +103,7 @@ DFROBOT_MID_SCHEMA = number.number_schema(
     cv.Optional(CONF_MAX_VALUE, default=5000.0): cv.float_,
     cv.Optional(CONF_STEP, default=1.0): cv.positive_float,
     cv.Optional(CONF_UNIT_OF_MEASUREMENT, default="mV"): cv.string,
-    cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+    cv.Optional(CONF_MODE, default="BOX"): cv.enum(number.NUMBER_MODES, upper=True),
 })
 
 # Schema for DFRobot offset_mv number
@@ -118,7 +119,7 @@ DFROBOT_OFFSET_SCHEMA = number.number_schema(
     cv.Optional(CONF_MAX_VALUE, default=1000.0): cv.float_,
     cv.Optional(CONF_STEP, default=1.0): cv.positive_float,
     cv.Optional(CONF_UNIT_OF_MEASUREMENT, default="mV"): cv.string,
-    cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+    cv.Optional(CONF_MODE, default="BOX"): cv.enum(number.NUMBER_MODES, upper=True),
 })
 
 # Combined config schema (typically not used directly, numbers are defined inline)

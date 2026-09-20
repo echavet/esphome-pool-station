@@ -1,3 +1,18 @@
+## [0.10.2] - 2026-09-20
+
+### Fixed — FilterRuntimeNumber `mode: box` codegen (ESPHome 2026.4.3)
+
+Lot B review defaulted filter runtime numbers to `mode: box` with
+`cv.one_of("BOX", "SLIDER")`. `number.register_number` then emitted
+`traits.set_mode("BOX")`, which does not convert to
+`esphome::number::NumberMode` (Eric OTA unblock after v0.10.1).
+
+- Use `cv.enum(number.NUMBER_MODES)` so codegen emits `NUMBER_MODE_BOX`
+- Same fix on calibration number schemas in `number.py`
+- No YAML change (Eric Mac YAML untouched)
+
+---
+
 ## [0.10.1] - 2026-09-20
 
 ### Fixed — `ads:` overlay rejected native `platform: ads1115` sources

@@ -579,9 +579,11 @@ def filter_runtime_number_schema(icon, unit=None):
     }
     if unit is not None:
         kwargs["unit_of_measurement"] = unit
-    # Design §4.1: clamp numbers use mode: box (same as other config numbers).
+    # Design §4.1: clamp numbers use mode box (same as other config numbers).
+    # Must use cv.enum(NUMBER_MODES) so register_number emits NUMBER_MODE_BOX,
+    # not a raw C string (ESPHome 2026.4.3 NumberMode).
     return number.number_schema(FilterRuntimeNumber, **kwargs).extend({
-        cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+        cv.Optional(CONF_MODE, default="BOX"): cv.enum(number.NUMBER_MODES, upper=True),
     })
 
 

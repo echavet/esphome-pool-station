@@ -16,6 +16,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 HELPER_PATH = os.path.join(ROOT, "components", "pool_station", "ads_runtime.py")
 ADS_H = os.path.join(ROOT, "components", "pool_station", "ads_runtime.h")
 INIT_PATH = os.path.join(ROOT, "components", "pool_station", "__init__.py")
+NUMBER_PY = os.path.join(ROOT, "components", "pool_station", "number.py")
 ENGINE_H = os.path.join(ROOT, "components", "pool_station", "calibration_engine.h")
 CHANNEL_CPP = os.path.join(ROOT, "components", "pool_station", "pool_station.cpp")
 CHANNEL_H = os.path.join(ROOT, "components", "pool_station", "pool_station.h")
@@ -450,6 +451,29 @@ class CodegenContractTest(unittest.TestCase):
         self.assertIn("validate_filter_runtime_seeds", source)
         self.assertIn("validate_filters_config", source)
         self.assertIn('default="BOX"', source)
+
+    def test_filter_runtime_number_mode_is_enum_not_string(self):
+        """ESPHome 2026.4 traits.set_mode(NumberMode) — not const char[4] BOX."""
+        with open(INIT_PATH, encoding="utf-8") as handle:
+            init = handle.read()
+        with open(NUMBER_PY, encoding="utf-8") as handle:
+            number_py = handle.read()
+        start = init.find("def filter_runtime_number_schema")
+        self.assertGreaterEqual(start, 0)
+        nxt = init.find("\ndef ", start + 1)
+        schema = init[start:nxt if nxt > 0 else None]
+        self.assertIn("cv.enum(number.NUMBER_MODES", schema)
+        self.assertIn('default="BOX"', schema)
+        self.assertNotIn('cv.one_of("BOX"', schema)
+        self.assertNotIn('cv.one_of("BOX"', init)
+        self.assertNotIn('cv.one_of("BOX"', number_py)
+        self.assertIn("cv.enum(number.NUMBER_MODES", number_py)
+        # Codegen must not emit a raw C++ string for NumberMode.
+        self.assertNotIn('set_mode("', init)
+        self.assertNotIn("set_mode('", init)
+        self.assertNotIn('set_mode("', number_py)
+        self.assertNotIn("set_mode('", number_py)
+        self.assertIn("number.register_number", init)
 
 
 class StampAndSentinelTest(unittest.TestCase):
