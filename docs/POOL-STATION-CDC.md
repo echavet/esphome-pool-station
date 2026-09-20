@@ -1,6 +1,6 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.10.1 (Lot B — filtres / intervalle canal runtime, compose)  
+> Version: 0.10.2 (Lot B — filtres / intervalle canal runtime, compose)  
 > Date: 2026-09-20  
 > Auteur: @echavet
 
