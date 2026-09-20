@@ -75,6 +75,9 @@ GENERIC_SENSOR_TYPE_NAMES = (
 
 ADS1115_PLATFORM = "ads1115"
 
+# ESPHome 2026.x ads1115 hub does not emit this; Lot A C++ is #ifdef'd on it.
+USE_ADS1115_DEFINE = "USE_ADS1115"
+
 ADS_OVERLAY_SOURCE_ERROR = (
     "ads: overlay requires source_id to be a native platform: ads1115 "
     "sensor (ADS1115Sensor). Non-ADS sources cannot use the overlay."
@@ -348,6 +351,47 @@ def ads_overlay_channel_error(channel, sensor_entries=None):
     if source_id_is_ads1115_sensor(source, sensor_entries=sensor_entries):
         return None
     return ADS_OVERLAY_SOURCE_ERROR
+
+
+def iter_channel_configs(config):
+    """Yield channel dicts from a pool_station config (pressure / ph / orp)."""
+    channels = (config or {}).get("channels") or {}
+    if isinstance(channels, dict):
+        return [ch for ch in channels.values() if isinstance(ch, dict)]
+    if isinstance(channels, list):
+        return [ch for ch in channels if isinstance(ch, dict)]
+    return []
+
+
+def config_needs_use_ads1115(config, sensor_entries=None):
+    """True when Lot A (ads:) or a composed platform: ads1115 source is present.
+
+    Used to emit ``USE_ADS1115`` without a hard ``DEPENDENCIES = ["ads1115"]``.
+    """
+    for ch in iter_channel_configs(config):
+        if ch.get("ads") is not None:
+            return True
+        if source_id_is_ads1115_sensor(ch.get("source_id"), sensor_entries=sensor_entries):
+            return True
+    return False
+
+
+def ensure_use_ads1115_define(config, add_define, sensor_entries=None):
+    """Call ``add_define("USE_ADS1115")`` when Lot A / ads1115 sources need it.
+
+    ESPHome 2026.x ``ads1115`` ``to_code`` does not ``cg.add_define(USE_ADS1115)``,
+    so Lot A C++ (bind / FSR / saturation / set_gain) compiled out on Eric
+    v0.10.2. Builds that omit ads1115 entirely stay clean (no define, no
+    hard dependency). Returns True if the define was added.
+    """
+    if add_define is None:
+        return False
+    if sensor_entries is None:
+        sensor_entries = try_core_sensor_entries()
+    if not config_needs_use_ads1115(config, sensor_entries=sensor_entries):
+        return False
+    add_define(USE_ADS1115_DEFINE)
+    return True
 
 
 def id_type_name(source_id):

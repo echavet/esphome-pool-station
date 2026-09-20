@@ -42,6 +42,7 @@ from .ads_runtime import (
     UPDATE_INTERVAL_S_MIN,
     ads_overlay_channel_error,
     ads_overlay_source_error,
+    ensure_use_ads1115_define,
     gain_float_to_code,
     id_type_name,
     is_generic_sensor_type_name,
@@ -1913,6 +1914,13 @@ async def setup_interference(config, parent_var):
 
 async def to_code(config):
     """Generate C++ code for pool_station component."""
+    # ESPHome 2026.x ads1115 hub does not cg.add_define("USE_ADS1115").
+    # Lot A C++ (set_ads1115_sensor / update_saturation_ / set_gain) is
+    # #ifdef USE_ADS1115 — without it FSR stays unknown and overlay is forced
+    # off. Emit the define when ads: or a composed ads1115 source is present.
+    # Still DEPENDENCIES = []: no ads1115 → no define, no hard dependency.
+    ensure_use_ads1115_define(config, cg.add_define)
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     
