@@ -1,3 +1,22 @@
+## [0.10.3] - 2026-09-20
+
+### Fixed — Lot A FSR% / saturation / runtime gain stuck after OTA
+
+ESPHome 2026.x `ads1115` hub does **not** `cg.add_define("USE_ADS1115")`.
+Lot A C++ (`set_ads1115_sensor`, `update_saturation_`, `set_gain`) is
+gated on that flag. Eric `defines.h` had `USE_SENSOR` / `USE_I2C` but no
+`USE_ADS1115`, so `sensor.*_adc_fsr` stayed `unknown` (boot only),
+`binary_sensor.*_saturated` stayed initial off, and HA gain select never
+reached the ADC.
+
+- `to_code` calls `cg.add_define("USE_ADS1115")` when any channel has
+  `ads:` **or** a composed `platform: ads1115` source
+- Still `DEPENDENCIES = []` — no ads1115 / no `ads:` → no define, no
+  hard dependency
+- No YAML change (Eric Mac YAML untouched)
+
+---
+
 ## [0.10.2] - 2026-09-20
 
 ### Fixed — FilterRuntimeNumber `mode: box` codegen (ESPHome 2026.4.3)

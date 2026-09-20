@@ -375,6 +375,10 @@ class AdsCodegenContractTest(unittest.TestCase):
         self.assertIn("generate_runtime_preferences_key", source)
         self.assertNotIn('DEPENDENCIES = ["ads1115"]', source)
         self.assertIn("DEPENDENCIES = []", source)
+        self.assertIn("ensure_use_ads1115_define", source)
+        self.assertIn("cg.add_define", source)
+        auto_load = source.split("AUTO_LOAD")[1].split("\n", 1)[0]
+        self.assertNotIn("ads1115", auto_load)
 
     def test_register_select_gain_not_empty(self):
         with open(INIT_PATH, encoding="utf-8") as handle:
@@ -471,6 +475,93 @@ class AdsCodegenContractTest(unittest.TestCase):
         self.assertIn("sensor_platform_for_id", helper)
         # inherits False / exception must fall through (no early return False)
         self.assertNotIn("except Exception:\n            return False", helper)
+
+
+class UseAds1115DefineTest(unittest.TestCase):
+    """Codegen path for USE_ADS1115 — no ESPHome import, mock add_define."""
+
+    def test_ads_block_emits_define(self):
+        added = []
+        ok = ads.ensure_use_ads1115_define(
+            {"channels": {"ph": {"source_id": "ads_ph", "ads": {"gain": 4.096}}}},
+            added.append,
+        )
+        self.assertTrue(ok)
+        self.assertEqual(added, [ads.USE_ADS1115_DEFINE])
+        self.assertEqual(ads.USE_ADS1115_DEFINE, "USE_ADS1115")
+
+    def test_empty_ads_dict_still_emits_define(self):
+        added = []
+        self.assertTrue(
+            ads.ensure_use_ads1115_define(
+                {"channels": {"orp": {"source_id": "ads_orp", "ads": {}}}},
+                added.append,
+            )
+        )
+        self.assertEqual(added, ["USE_ADS1115"])
+
+    def test_ads1115_source_without_ads_emits_define(self):
+        added = []
+
+        class IdObj:
+            id = "ads_ph"
+
+        ok = ads.ensure_use_ads1115_define(
+            {"channels": {"ph": {"source_id": IdObj()}}},
+            added.append,
+            sensor_entries=[{"id": "ads_ph", "platform": "ads1115"}],
+        )
+        self.assertTrue(ok)
+        self.assertEqual(added, ["USE_ADS1115"])
+
+    def test_dallas_only_does_not_emit_define(self):
+        added = []
+
+        class IdObj:
+            id = "water_temp"
+
+        ok = ads.ensure_use_ads1115_define(
+            {"channels": {"ph": {"source_id": IdObj()}}},
+            added.append,
+            sensor_entries=[{"id": "water_temp", "platform": "dallas"}],
+        )
+        self.assertFalse(ok)
+        self.assertEqual(added, [])
+
+    def test_empty_config_no_define(self):
+        added = []
+        self.assertFalse(ads.ensure_use_ads1115_define({}, added.append))
+        self.assertFalse(ads.ensure_use_ads1115_define(None, added.append))
+        self.assertFalse(ads.ensure_use_ads1115_define({"channels": {}}, added.append))
+        self.assertFalse(ads.config_needs_use_ads1115({}))
+        self.assertEqual(added, [])
+
+    def test_add_define_none_is_noop(self):
+        self.assertFalse(
+            ads.ensure_use_ads1115_define(
+                {"channels": {"ph": {"ads": {"gain": 4.096}}}},
+                None,
+            )
+        )
+
+    def test_config_needs_define_from_ads_or_platform(self):
+        self.assertTrue(
+            ads.config_needs_use_ads1115(
+                {"channels": {"orp": {"source_id": "ads_orp", "ads": {}}}}
+            )
+        )
+        self.assertTrue(
+            ads.config_needs_use_ads1115(
+                {"channels": {"ph": {"source_id": "ads_ph"}}},
+                sensor_entries=[{"id": "ads_ph", "platform": "ads1115"}],
+            )
+        )
+        self.assertFalse(
+            ads.config_needs_use_ads1115(
+                {"channels": {"ph": {"source_id": "water_temp"}}},
+                sensor_entries=[{"id": "water_temp", "platform": "dallas"}],
+            )
+        )
 
 
 class AdsGainRoundTripTest(unittest.TestCase):

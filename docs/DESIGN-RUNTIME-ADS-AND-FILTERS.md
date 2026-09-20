@@ -243,7 +243,11 @@ ads1115::ADS1115Gain get_gain_shadow() const;
 
 Codegen : si `ads:` présent, `source_id` **doit** être un `ADS1115Sensor` (`cv.use_id` typé ou validateur). Sinon erreur de config, pas un `static_cast` silencieux.
 
-`USE_ADS1115` est déjà défini par ESPHome quand le hub est dans le YAML (install Eric : toujours).
+`USE_ADS1115` n’est **pas** émis par le hub ads1115 ESPHome 2026.x (v0.10.2
+Eric : `defines.h` sans ce flag → overlay forcé off). `pool_station.to_code`
+appelle `cg.add_define("USE_ADS1115")` dès qu’un canal a `ads:` ou un
+`source_id` `platform: ads1115`. Sans ads1115 : pas de define,
+`DEPENDENCIES` reste `[]`.
 
 Shadow obligatoire : sans getter upstream, le canal est **source de vérité** après `setup()` :
 

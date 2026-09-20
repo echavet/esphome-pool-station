@@ -41,7 +41,7 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 | **Runtime ADS gain** | A | ✅ Done | HA PGA select, saturation ≥98 % FSR, sidecar NVS (compose) |
 | **Runtime filters** | B | ✅ Done | HA numbers for Lot 3 filters + channel `update_interval` (compose) |
 
-## Current Status — Lot B (v0.10.2)
+## Current Status — Lot B (v0.10.3)
 
 **Lot B** — Runtime Lot 3 filters + channel interval (opt-in `filters.runtime`):
 - ✅ HA `number` for `filter_samples` / `max_jump` / `max_jump_streak` / clamp
