@@ -14,6 +14,7 @@ from esphome.const import (
     CONF_UPDATE_INTERVAL,
     CONF_ICON,
     CONF_ENTITY_CATEGORY,
+    CONF_MODE,
     ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_VOLT,
@@ -29,11 +30,21 @@ from .sensor_register_compat import sensor_register_config
 from .algorithm_select_options import algorithm_select_options
 from .prefs_key import generate_preferences_key, generate_runtime_preferences_key
 from .ads_runtime import (
+    FILTER_NUMBER_SPECS,
+    FILTER_RT_MAX_JUMP,
+    FILTER_RT_MAX_JUMP_STREAK,
+    FILTER_RT_SAMPLES,
+    FILTER_RT_UPDATE_INTERVAL_S,
+    FILTER_RT_VALUE_MAX,
+    FILTER_RT_VALUE_MIN,
     GAIN_SELECT_OPTIONS,
+    UPDATE_INTERVAL_S_MAX,
+    UPDATE_INTERVAL_S_MIN,
     ads_overlay_source_error,
     gain_float_to_code,
     id_type_name,
     source_id_is_ads1115_sensor,
+    validate_filter_runtime_seeds,
 )
 
 CODEOWNERS = ["@echavet"]
@@ -210,6 +221,14 @@ AdsResetYamlButton = pool_station_ns.class_(
     "AdsResetYamlButton", button.Button, cg.Component
 )
 
+# Lot B: runtime filter / interval numbers (one C++ class, kind-dispatched)
+FilterRuntimeNumber = pool_station_ns.class_(
+    "FilterRuntimeNumber", number.Number, cg.Component
+)
+FiltersResetYamlButton = pool_station_ns.class_(
+    "FiltersResetYamlButton", button.Button, cg.Component
+)
+
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
 CONF_CALIBRATION_MODE = "calibration_mode"
@@ -229,6 +248,9 @@ CONF_MAX_JUMP = "max_jump"
 CONF_MAX_JUMP_STREAK = "max_jump_streak"
 CONF_VALUE_MIN = "value_min"
 CONF_VALUE_MAX = "value_max"
+CONF_FILTER_RUNTIME = "runtime"
+CONF_PERSIST = "persist"
+CONF_UPDATE_INTERVAL_NUMBER = "update_interval_number"
 
 # Diagnostics configuration keys (Lot 4)
 CONF_DIAGNOSTICS = "diagnostics"
@@ -528,8 +550,46 @@ def ads_schema():
     })
 
 
+def filter_runtime_number_schema(icon, unit=None):
+    """Opt-in HA number under filters.runtime (Lot B). Same C++ class, kind set in codegen."""
+    kwargs = {
+        "icon": icon,
+        "entity_category": ENTITY_CATEGORY_CONFIG,
+    }
+    if unit is not None:
+        kwargs["unit_of_measurement"] = unit
+    # Design §4.1: clamp numbers use mode: box (same as other config numbers).
+    return number.number_schema(FilterRuntimeNumber, **kwargs).extend({
+        cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+    })
+
+
+def validate_filters_config(config):
+    err = validate_filter_runtime_seeds(config)
+    if err:
+        raise cv.Invalid(err)
+    return config
+
+
+def filters_runtime_schema():
+    """HA overlay for Lot 3 setters. persist default true when this block exists."""
+    return cv.Schema({
+        cv.Optional(CONF_PERSIST, default=True): cv.boolean,
+        cv.Optional(CONF_FILTER_SAMPLES): filter_runtime_number_schema("mdi:chart-bell-curve"),
+        cv.Optional(CONF_MAX_JUMP): filter_runtime_number_schema("mdi:arrow-expand-vertical"),
+        cv.Optional(CONF_MAX_JUMP_STREAK): filter_runtime_number_schema("mdi:repeat"),
+        cv.Optional(CONF_VALUE_MIN): filter_runtime_number_schema("mdi:arrow-collapse-down"),
+        cv.Optional(CONF_VALUE_MAX): filter_runtime_number_schema("mdi:arrow-collapse-up"),
+        cv.Optional(CONF_RESET_YAML_BUTTON): button.button_schema(
+            FiltersResetYamlButton,
+            icon="mdi:filter-remove",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+    })
+
+
 def filters_schema():
-    """Schema for channel filter configuration (Lot 3).
+    """Schema for channel filter configuration (Lot 3 + optional Lot B runtime).
     
     Pipeline order: raw → median window → calibrate → clamp → jump guard → publish
     
@@ -537,18 +597,21 @@ def filters_schema():
     - max_jump: Maximum allowed change between readings (0 = disabled)
     - max_jump_streak: Accept new plateau after N consecutive similar values
     - value_min/value_max: Clamp calibrated values to range
+    - runtime: opt-in HA numbers + NVS sidecar (same ps-md5-rt-v1 as Lot A)
     
     YAML key is `filters:` (same string as ESPHome CONF_FILTERS). Codegen
     must strip this key before sensor.register_sensor() — see
-    sensor_register_compat.sensor_register_config().
+    sensor_register_compat.sensor_register_config(). `runtime` stays inside
+    this dict so it is stripped too (no collision with build_filters()).
     """
-    return cv.Schema({
+    return cv.All(cv.Schema({
         cv.Optional(CONF_FILTER_SAMPLES, default=0): cv.int_range(min=0, max=20),
         cv.Optional(CONF_MAX_JUMP, default=0.0): cv.float_,
         cv.Optional(CONF_MAX_JUMP_STREAK, default=3): cv.int_range(min=1, max=10),
         cv.Optional(CONF_VALUE_MIN): cv.float_,
         cv.Optional(CONF_VALUE_MAX): cv.float_,
-    })
+        cv.Optional(CONF_FILTER_RUNTIME): filters_runtime_schema(),
+    }), validate_filters_config)
 
 
 def diagnostics_schema(channel_type):
@@ -973,6 +1036,10 @@ def channel_schema(channel_type):
     ).extend({
         cv.Required(CONF_SOURCE_ID): cv.use_id(sensor.Sensor),
         cv.Optional(CONF_UPDATE_INTERVAL, default="1s"): cv.update_interval,
+        # Lot B: HA-tunable channel throttle (seconds). Distinct from ADS poll.
+        cv.Optional(CONF_UPDATE_INTERVAL_NUMBER): filter_runtime_number_schema(
+            "mdi:timer-outline", unit="s"
+        ),
         cv.Optional(CONF_RAW_SENSOR): sensor.sensor_schema(
             unit_of_measurement=defaults.get("raw_unit", "V"),
             accuracy_decimals=defaults.get("raw_accuracy", 3),
@@ -1466,6 +1533,79 @@ async def setup_ads_overlay(config, parent_var, channel_var, channel_type, compo
         await button.register_button(btn_var, btn_conf)
 
 
+async def setup_filter_runtime(config, parent_var, channel_var, channel_type, component_id, channel_key):
+    """Lot B HA numbers for Lot 3 filters + optional channel update_interval.
+
+    No-op when filters.runtime and update_interval_number are both omitted.
+    Persistence uses the same ps-md5-rt-v1 sidecar as Lot A (do not bump cal magic).
+    """
+    flt_conf = config.get(CONF_FILTERS) or {}
+    rt_conf = flt_conf.get(CONF_FILTER_RUNTIME) if flt_conf else None
+    interval_conf = config.get(CONF_UPDATE_INTERVAL_NUMBER)
+    if rt_conf is None and interval_conf is None:
+        return
+
+    persist_filters = bool(rt_conf is not None and rt_conf.get(CONF_PERSIST, True))
+    persist_interval = interval_conf is not None
+    if persist_filters or persist_interval:
+        cg.add(channel_var.set_runtime_preferences_key(
+            generate_runtime_preferences_key(component_id, channel_type)
+        ))
+    if persist_filters:
+        cg.add(channel_var.set_filters_persist(True))
+    if persist_interval:
+        cg.add(channel_var.set_interval_persist(True))
+
+    specs = FILTER_NUMBER_SPECS.get(channel_key, FILTER_NUMBER_SPECS["ph"])
+
+    async def _bind_number(num_conf, kind, min_value, max_value, step):
+        num_var = cg.new_Pvariable(num_conf[CONF_ID])
+        cg.add(num_var.set_parent(parent_var))
+        cg.add(num_var.set_channel_type(channel_type))
+        cg.add(num_var.set_kind(kind))
+        cg.add(channel_var.register_filter_runtime_number(num_var))
+        # register_number already registers the Component (ESPHome 2026.4+).
+        await number.register_number(
+            num_var, num_conf,
+            min_value=min_value,
+            max_value=max_value,
+            step=step,
+        )
+
+    if rt_conf is not None:
+        if CONF_FILTER_SAMPLES in rt_conf:
+            await _bind_number(rt_conf[CONF_FILTER_SAMPLES], FILTER_RT_SAMPLES, 0, 20, 1)
+        if CONF_MAX_JUMP in rt_conf:
+            await _bind_number(
+                rt_conf[CONF_MAX_JUMP], FILTER_RT_MAX_JUMP,
+                0.0, specs["jump_max"], specs["jump_step"],
+            )
+        if CONF_MAX_JUMP_STREAK in rt_conf:
+            await _bind_number(rt_conf[CONF_MAX_JUMP_STREAK], FILTER_RT_MAX_JUMP_STREAK, 1, 10, 1)
+        if CONF_VALUE_MIN in rt_conf:
+            await _bind_number(
+                rt_conf[CONF_VALUE_MIN], FILTER_RT_VALUE_MIN,
+                specs["value_min"], specs["value_max"], specs["clamp_step"],
+            )
+        if CONF_VALUE_MAX in rt_conf:
+            await _bind_number(
+                rt_conf[CONF_VALUE_MAX], FILTER_RT_VALUE_MAX,
+                specs["value_min"], specs["value_max"], specs["clamp_step"],
+            )
+        if CONF_RESET_YAML_BUTTON in rt_conf:
+            btn_conf = rt_conf[CONF_RESET_YAML_BUTTON]
+            btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
+            cg.add(btn_var.set_parent(parent_var))
+            cg.add(btn_var.set_channel_type(channel_type))
+            await button.register_button(btn_var, btn_conf)
+
+    if interval_conf is not None:
+        await _bind_number(
+            interval_conf, FILTER_RT_UPDATE_INTERVAL_S,
+            UPDATE_INTERVAL_S_MIN, UPDATE_INTERVAL_S_MAX, 1,
+        )
+
+
 async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):
     """Setup diagnostic sensors and flags for a channel (Lot 4)."""
     diag_conf = config.get(CONF_DIAGNOSTICS)
@@ -1850,6 +1990,11 @@ async def to_code(config):
             # Setup Lot A ADS overlay (opt-in)
             await setup_ads_overlay(
                 ch_conf, var, ch_var, channel_type, str(config[CONF_ID])
+            )
+
+            # Setup Lot B filter / interval HA overlay (opt-in)
+            await setup_filter_runtime(
+                ch_conf, var, ch_var, channel_type, str(config[CONF_ID]), channel_key
             )
 
             # Setup Capturer UI

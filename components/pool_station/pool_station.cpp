@@ -1,5 +1,6 @@
 #include "pool_station.h"
 #include "calibration_ui.h"
+#include <cmath>
 
 namespace esphome {
 namespace pool_station {
@@ -370,30 +371,39 @@ void PoolStationChannelSensor::setup() {
   // Load calibration from preferences (if available)
   this->calibration_.load_from_preferences();
 
-  // Lot A: YAML seed then NVS overlay (NVS wins). Apply before subscribe so
+  // Snapshot YAML seeds before NVS (Lot A gain + Lot B filters/interval).
+  this->snapshot_yaml_filter_seeds_();
+
+  // Lot A/B: YAML seed then NVS overlay (NVS wins). Apply before subscribe so
   // the first source poll usually sees the runtime gain. One YAML-gain sample
   // is still possible if the ADS already updated during its own setup.
-  if (this->ads_overlay_enabled_) {
+  if (this->ads_overlay_enabled_ || this->runtime_prefs_key_ != 0) {
     ads_runtime::init_unmanaged(&this->runtime_prefs_cache_);
+  }
+  if (this->ads_overlay_enabled_) {
     this->gain_shadow_ = this->yaml_gain_;
     this->apply_ads_gain_to_source_();
+  }
+  if (this->runtime_prefs_key_ != 0) {
     this->load_runtime_preferences();
+  }
+  if (this->ads_overlay_enabled_) {
     this->publish_ads_ui_();
   }
+  this->publish_filter_ui_();
   
-  // Initialize filter components (Lot 3)
+  // Initialize filter components (Lot 3 / Lot B after possible NVS override).
+  // sync_* skip a no-op resize/reset so a NVS apply does not clear twice.
+  this->sync_median_window_();
+  this->sync_jump_guard_(false);
   if (this->filter_config_.is_median_enabled()) {
-    this->raw_window_.set_size(this->filter_config_.filter_samples);
-    ESP_LOGD(TAG, "Channel %s median filter: %d samples", 
+    ESP_LOGD(TAG, "Channel %s median filter: %d samples",
              this->get_channel_type_name(), this->filter_config_.filter_samples);
   }
-  
   if (this->filter_config_.is_jump_guard_enabled()) {
-    this->jump_guard_.set_max_jump(this->filter_config_.max_jump);
-    this->jump_guard_.set_streak_threshold(this->filter_config_.max_jump_streak);
     ESP_LOGD(TAG, "Channel %s jump guard: max_jump=%.3f, streak=%d",
-             this->get_channel_type_name(), 
-             this->filter_config_.max_jump, 
+             this->get_channel_type_name(),
+             this->filter_config_.max_jump,
              this->filter_config_.max_jump_streak);
   }
   
@@ -485,6 +495,11 @@ void PoolStationChannelSensor::dump_config() {
   }
   if (!std::isnan(this->filter_config_.value_max)) {
     ESP_LOGCONFIG(TAG, "    value_max: %.3f", this->filter_config_.value_max);
+  }
+  if (this->filters_persist_ || this->interval_persist_) {
+    ESP_LOGCONFIG(TAG, "    runtime persist: %s%s (sidecar ps-md5-rt-v1, not cal draft)",
+                  this->filters_persist_ ? "filters" : "",
+                  this->interval_persist_ ? (this->filters_persist_ ? "+interval" : "interval") : "");
   }
   
   // Dump calibration config
@@ -701,14 +716,16 @@ void PoolStationChannelSensor::load_runtime_preferences() {
   this->runtime_prefs_cache_ = data;
   this->runtime_prefs_loaded_ = true;
   this->gain_at_last_cal_save_ = data.gain_at_last_cal_save;
-  if ((data.flags & ads_runtime::RT_FLAG_HAS_GAIN) && ads_runtime::is_managed_gain(data.ads_gain)) {
+  if (this->ads_overlay_enabled_ && (data.flags & ads_runtime::RT_FLAG_HAS_GAIN) &&
+      ads_runtime::is_managed_gain(data.ads_gain)) {
     this->apply_gain_runtime(data.ads_gain, false);
     ESP_LOGI(TAG, "Channel %s: loaded runtime ADS gain %s from NVS",
              this->get_channel_type_name(), ads_runtime::gain_code_to_label(data.ads_gain));
   }
+  this->apply_nvs_filter_fields_(data);
 }
 
-void PoolStationChannelSensor::save_runtime_preferences() {
+void PoolStationChannelSensor::save_runtime_preferences(bool stamp_filters, bool stamp_interval) {
   if (this->runtime_prefs_key_ == 0) {
     return;
   }
@@ -719,9 +736,36 @@ void PoolStationChannelSensor::save_runtime_preferences() {
   }
   data.magic = ads_runtime::CHANNEL_RUNTIME_PREFS_MAGIC;
   data.version = ads_runtime::CHANNEL_RUNTIME_PREFS_VERSION;
-  data.ads_gain = this->gain_shadow_;
-  data.flags = static_cast<uint8_t>(data.flags | ads_runtime::RT_FLAG_HAS_GAIN);
-  data.gain_at_last_cal_save = this->gain_at_last_cal_save_;
+  if (this->ads_overlay_enabled_) {
+    data.ads_gain = this->gain_shadow_;
+    data.flags = static_cast<uint8_t>(data.flags | ads_runtime::RT_FLAG_HAS_GAIN);
+    data.gain_at_last_cal_save = this->gain_at_last_cal_save_;
+  }
+  // Design §4.2: Save cal / gain apply must not write filters. Only a
+  // filter HA apply (or reset_yaml) stamps these fields so a Lot A blob
+  // plus an unused filters.runtime: persist does not freeze YAML seeds.
+  if (this->filters_persist_ && stamp_filters) {
+    data.filter_samples = this->filter_config_.filter_samples;
+    data.max_jump_streak = this->filter_config_.max_jump_streak;
+    data.max_jump = this->filter_config_.max_jump;
+    if (!std::isnan(this->filter_config_.value_min)) {
+      data.flags = static_cast<uint8_t>(data.flags | ads_runtime::RT_FLAG_HAS_VMIN);
+      data.value_min = this->filter_config_.value_min;
+    } else {
+      data.flags = static_cast<uint8_t>(data.flags & ~ads_runtime::RT_FLAG_HAS_VMIN);
+      data.value_min = NAN;
+    }
+    if (!std::isnan(this->filter_config_.value_max)) {
+      data.flags = static_cast<uint8_t>(data.flags | ads_runtime::RT_FLAG_HAS_VMAX);
+      data.value_max = this->filter_config_.value_max;
+    } else {
+      data.flags = static_cast<uint8_t>(data.flags & ~ads_runtime::RT_FLAG_HAS_VMAX);
+      data.value_max = NAN;
+    }
+  }
+  if (this->interval_persist_ && stamp_interval) {
+    data.update_interval_ms = this->configured_interval_;
+  }
   this->runtime_prefs_.save(&data);
   this->runtime_prefs_cache_ = data;
   this->runtime_prefs_loaded_ = true;
@@ -835,6 +879,197 @@ void PoolStationChannelSensor::set_value_min(float min) {
 
 void PoolStationChannelSensor::set_value_max(float max) {
   this->filter_config_.value_max = max;
+}
+
+void PoolStationChannelSensor::snapshot_yaml_filter_seeds_() {
+  this->yaml_filter_samples_ = this->filter_config_.filter_samples;
+  this->yaml_max_jump_ = this->filter_config_.max_jump;
+  this->yaml_max_jump_streak_ = this->filter_config_.max_jump_streak;
+  this->yaml_value_min_ = this->filter_config_.value_min;
+  this->yaml_value_max_ = this->filter_config_.value_max;
+  this->yaml_update_interval_ms_ = this->configured_interval_;
+}
+
+void PoolStationChannelSensor::sync_median_window_() {
+  const uint8_t want =
+      this->filter_config_.is_median_enabled() ? this->filter_config_.filter_samples : 0;
+  if (this->raw_window_.get_size() == want) {
+    return;
+  }
+  this->raw_window_.set_size(want);
+}
+
+void PoolStationChannelSensor::sync_jump_guard_(bool reset) {
+  const bool unchanged = (this->jump_guard_.get_max_jump() == this->filter_config_.max_jump) &&
+                         (this->jump_guard_.get_streak_threshold() == this->filter_config_.max_jump_streak);
+  this->jump_guard_.set_max_jump(this->filter_config_.max_jump);
+  this->jump_guard_.set_streak_threshold(this->filter_config_.max_jump_streak);
+  if (reset && !unchanged) {
+    this->jump_guard_.reset();
+  }
+}
+
+void PoolStationChannelSensor::publish_filter_ui_() {
+  for (FilterRuntimeNumber *num : this->filter_runtime_numbers_) {
+    if (num != nullptr) {
+      num->update_from_channel();
+    }
+  }
+}
+
+void PoolStationChannelSensor::persist_filters_if_(bool persist) {
+  if (persist && this->filters_persist_) {
+    this->save_runtime_preferences(true, false);
+  }
+}
+
+void PoolStationChannelSensor::persist_interval_if_(bool persist) {
+  if (persist && this->interval_persist_) {
+    this->save_runtime_preferences(false, true);
+  }
+}
+
+void PoolStationChannelSensor::register_filter_runtime_number(FilterRuntimeNumber *num) {
+  if (num == nullptr) {
+    return;
+  }
+  this->filter_runtime_numbers_.push_back(num);
+}
+
+void PoolStationChannelSensor::apply_nvs_filter_fields_(const ads_runtime::ChannelRuntimePrefsData &data) {
+  bool applied = false;
+  if (this->filters_persist_) {
+    if (ads_runtime::is_managed_u8(data.filter_samples)) {
+      this->apply_filter_samples_runtime(data.filter_samples, false);
+      applied = true;
+    }
+    if (ads_runtime::is_managed_float(data.max_jump)) {
+      this->apply_max_jump_runtime(data.max_jump, false);
+      applied = true;
+    }
+    if (ads_runtime::is_managed_u8(data.max_jump_streak)) {
+      this->apply_max_jump_streak_runtime(data.max_jump_streak, false);
+      applied = true;
+    }
+    if ((data.flags & ads_runtime::RT_FLAG_HAS_VMIN) &&
+        ads_runtime::is_managed_float(data.value_min)) {
+      this->apply_value_min_runtime(data.value_min, false);
+      applied = true;
+    }
+    if ((data.flags & ads_runtime::RT_FLAG_HAS_VMAX) &&
+        ads_runtime::is_managed_float(data.value_max)) {
+      this->apply_value_max_runtime(data.value_max, false);
+      applied = true;
+    }
+    if (applied) {
+      ESP_LOGI(TAG, "Channel %s: loaded runtime filters from NVS (samples=%u jump=%.3f streak=%u)",
+               this->get_channel_type_name(), this->filter_config_.filter_samples,
+               this->filter_config_.max_jump, this->filter_config_.max_jump_streak);
+    }
+  }
+  if (this->interval_persist_ && ads_runtime::is_managed_interval_ms(data.update_interval_ms)) {
+    this->apply_update_interval_runtime(data.update_interval_ms, false);
+    ESP_LOGI(TAG, "Channel %s: loaded runtime update_interval %u ms from NVS",
+             this->get_channel_type_name(), this->configured_interval_);
+  }
+}
+
+void PoolStationChannelSensor::apply_filter_samples_runtime(uint8_t n, bool persist) {
+  this->filter_config_.filter_samples = ads_runtime::clamp_filter_samples(n);
+  // set_size() clears — publish raw until is_full() (same as boot).
+  this->sync_median_window_();
+  this->persist_filters_if_(persist);
+  this->publish_filter_ui_();
+  ESP_LOGI(TAG, "Channel %s: filter_samples=%u (median window resized, not a cal draft)",
+           this->get_channel_type_name(), this->filter_config_.filter_samples);
+}
+
+void PoolStationChannelSensor::apply_max_jump_runtime(float j, bool persist) {
+  this->filter_config_.max_jump = ads_runtime::clamp_max_jump(j);
+  this->sync_jump_guard_(true);
+  this->persist_filters_if_(persist);
+  this->publish_filter_ui_();
+  ESP_LOGI(TAG, "Channel %s: max_jump=%.3f (JumpGuard reset, Lot 8 still pre-guard)",
+           this->get_channel_type_name(), this->filter_config_.max_jump);
+}
+
+void PoolStationChannelSensor::apply_max_jump_streak_runtime(uint8_t s, bool persist) {
+  this->filter_config_.max_jump_streak = ads_runtime::clamp_max_jump_streak(s);
+  this->sync_jump_guard_(true);
+  this->persist_filters_if_(persist);
+  this->publish_filter_ui_();
+  ESP_LOGI(TAG, "Channel %s: max_jump_streak=%u (JumpGuard reset)",
+           this->get_channel_type_name(), this->filter_config_.max_jump_streak);
+}
+
+void PoolStationChannelSensor::apply_value_min_runtime(float v, bool persist) {
+  if (!std::isnan(v) && !std::isfinite(v)) {
+    ESP_LOGW(TAG, "Channel %s: ignore non-finite value_min", this->get_channel_type_name());
+    this->publish_filter_ui_();
+    return;
+  }
+  if (!ads_runtime::clamp_bounds_valid(v, this->filter_config_.value_max)) {
+    ESP_LOGW(TAG, "Channel %s: value_min=%.3f > value_max=%.3f, clamp apply refused",
+             this->get_channel_type_name(), v, this->filter_config_.value_max);
+    this->publish_filter_ui_();
+    return;
+  }
+  this->filter_config_.value_min = v;
+  this->persist_filters_if_(persist);
+  this->publish_filter_ui_();
+  if (std::isnan(v)) {
+    ESP_LOGI(TAG, "Channel %s: value_min clamp off", this->get_channel_type_name());
+  } else {
+    ESP_LOGI(TAG, "Channel %s: value_min=%.3f (clamp, not j5 reject)",
+             this->get_channel_type_name(), v);
+  }
+}
+
+void PoolStationChannelSensor::apply_value_max_runtime(float v, bool persist) {
+  if (!std::isnan(v) && !std::isfinite(v)) {
+    ESP_LOGW(TAG, "Channel %s: ignore non-finite value_max", this->get_channel_type_name());
+    this->publish_filter_ui_();
+    return;
+  }
+  if (!ads_runtime::clamp_bounds_valid(this->filter_config_.value_min, v)) {
+    ESP_LOGW(TAG, "Channel %s: value_max=%.3f < value_min=%.3f, clamp apply refused",
+             this->get_channel_type_name(), v, this->filter_config_.value_min);
+    this->publish_filter_ui_();
+    return;
+  }
+  this->filter_config_.value_max = v;
+  this->persist_filters_if_(persist);
+  this->publish_filter_ui_();
+  if (std::isnan(v)) {
+    ESP_LOGI(TAG, "Channel %s: value_max clamp off", this->get_channel_type_name());
+  } else {
+    ESP_LOGI(TAG, "Channel %s: value_max=%.3f (clamp, not j5 reject)",
+             this->get_channel_type_name(), v);
+  }
+}
+
+void PoolStationChannelSensor::apply_update_interval_runtime(uint32_t ms, bool persist) {
+  // HA widget is 1–3600 s. YAML seeds / NVS restore keep sub-second intervals.
+  this->configured_interval_ = ads_runtime::sanitize_update_interval_ms(ms, persist);
+  this->persist_interval_if_(persist);
+  this->publish_filter_ui_();
+  ESP_LOGI(TAG, "Channel %s: update_interval=%u ms (cal-mode still %u ms; ADS source unchanged)",
+           this->get_channel_type_name(), this->configured_interval_,
+           this->parent_ != nullptr ? this->parent_->get_calibration_interval() : 1000);
+}
+
+void PoolStationChannelSensor::reset_filters_to_yaml() {
+  ESP_LOGI(TAG, "Channel %s: reset filters/interval to YAML seeds", this->get_channel_type_name());
+  this->apply_filter_samples_runtime(this->yaml_filter_samples_, false);
+  this->apply_max_jump_runtime(this->yaml_max_jump_, false);
+  this->apply_max_jump_streak_runtime(this->yaml_max_jump_streak_, false);
+  this->apply_value_min_runtime(this->yaml_value_min_, false);
+  this->apply_value_max_runtime(this->yaml_value_max_, false);
+  this->apply_update_interval_runtime(this->yaml_update_interval_ms_, false);
+  if (this->filters_persist_ || this->interval_persist_) {
+    this->save_runtime_preferences(this->filters_persist_, this->interval_persist_);
+  }
+  this->publish_filter_ui_();
 }
 
 // ============================================================================

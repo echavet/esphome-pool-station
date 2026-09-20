@@ -469,5 +469,55 @@ class AdsResetYamlButton : public button::Button, public Component {
   uint8_t channel_type_{0};
 };
 
+// ============================================================================
+// Lot B: Runtime filter / interval numbers (outside Capturer draft)
+// ============================================================================
+
+/**
+ * One number class for Lot B tunables. Kind selects which apply_* to call.
+ * Changing a filter does not dirty the Capturer draft and is not cal-locked.
+ */
+class FilterRuntimeNumber : public number::Number, public Component {
+ public:
+  FilterRuntimeNumber() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+  void set_kind(uint8_t kind) { this->kind_ = kind; }
+  uint8_t get_kind() const { return this->kind_; }
+
+  void update_from_channel();
+
+ protected:
+  void control(float value) override;
+
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+  uint8_t kind_{ads_runtime::FILTER_RT_SAMPLES};
+};
+
+/**
+ * Restore YAML filter / interval seeds (RAM + NVS). Allowed in Calibration Mode.
+ */
+class FiltersResetYamlButton : public button::Button, public Component {
+ public:
+  FiltersResetYamlButton() = default;
+
+  void setup() override {}
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  void press_action() override;
+
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
 }  // namespace pool_station
 }  // namespace esphome

@@ -1,4 +1,5 @@
 #include "calibration_ui.h"
+#include <cmath>
 
 namespace esphome {
 namespace pool_station {
@@ -949,6 +950,124 @@ void AdsResetYamlButton::press_action() {
     return;
   }
   channel->reset_ads_to_yaml();
+}
+
+// ============================================================================
+// Lot B: FilterRuntimeNumber / FiltersResetYamlButton
+// ============================================================================
+
+void FilterRuntimeNumber::setup() {
+  ESP_LOGD(TAG, "Setting up FilterRuntimeNumber (channel=%d kind=%u)",
+           this->channel_type_, this->kind_);
+  this->update_from_channel();
+}
+
+void FilterRuntimeNumber::dump_config() {
+  LOG_NUMBER("", "Filter Runtime Number", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+  ESP_LOGCONFIG(TAG, "  Kind: %u", this->kind_);
+}
+
+void FilterRuntimeNumber::update_from_channel() {
+  if (this->parent_ == nullptr) {
+    return;
+  }
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    return;
+  }
+  float state = NAN;
+  switch (this->kind_) {
+    case ads_runtime::FILTER_RT_SAMPLES:
+      state = static_cast<float>(channel->get_filter_samples());
+      break;
+    case ads_runtime::FILTER_RT_MAX_JUMP:
+      state = channel->get_max_jump();
+      break;
+    case ads_runtime::FILTER_RT_MAX_JUMP_STREAK:
+      state = static_cast<float>(channel->get_max_jump_streak());
+      break;
+    case ads_runtime::FILTER_RT_VALUE_MIN:
+      state = channel->get_value_min();
+      break;
+    case ads_runtime::FILTER_RT_VALUE_MAX:
+      state = channel->get_value_max();
+      break;
+    case ads_runtime::FILTER_RT_UPDATE_INTERVAL_S:
+      state = static_cast<float>(channel->get_configured_interval_ms()) / 1000.0f;
+      break;
+    default:
+      return;
+  }
+  if (!std::isnan(state)) {
+    this->publish_state(state);
+  }
+}
+
+void FilterRuntimeNumber::control(float value) {
+  if (this->parent_ == nullptr) {
+    return;
+  }
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(TAG, "Channel %d not found for filter runtime number kind %u",
+             this->channel_type_, this->kind_);
+    return;
+  }
+  if (!std::isfinite(value)) {
+    ESP_LOGW(TAG, "Ignore non-finite filter runtime value for channel %d kind %u",
+             this->channel_type_, this->kind_);
+    this->update_from_channel();
+    return;
+  }
+  // Not locked in Calibration Mode (median/jump already bypass). Do not dirty draft.
+  switch (this->kind_) {
+    case ads_runtime::FILTER_RT_SAMPLES:
+      channel->apply_filter_samples_runtime(static_cast<uint8_t>(value + 0.5f), true);
+      break;
+    case ads_runtime::FILTER_RT_MAX_JUMP:
+      channel->apply_max_jump_runtime(value, true);
+      break;
+    case ads_runtime::FILTER_RT_MAX_JUMP_STREAK:
+      channel->apply_max_jump_streak_runtime(static_cast<uint8_t>(value + 0.5f), true);
+      break;
+    case ads_runtime::FILTER_RT_VALUE_MIN:
+      channel->apply_value_min_runtime(value, true);
+      break;
+    case ads_runtime::FILTER_RT_VALUE_MAX:
+      channel->apply_value_max_runtime(value, true);
+      break;
+    case ads_runtime::FILTER_RT_UPDATE_INTERVAL_S: {
+      float ms = value * 1000.0f;
+      if (ms < 0.0f) {
+        ms = 0.0f;
+      }
+      channel->apply_update_interval_runtime(static_cast<uint32_t>(ms + 0.5f), true);
+      break;
+    }
+    default:
+      ESP_LOGW(TAG, "Unknown filter runtime kind %u", this->kind_);
+      break;
+  }
+  this->update_from_channel();
+}
+
+void FiltersResetYamlButton::dump_config() {
+  LOG_BUTTON("", "Filters Reset YAML", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+void FiltersResetYamlButton::press_action() {
+  if (this->parent_ == nullptr) {
+    ESP_LOGW(TAG, "Filters reset YAML button has no parent");
+    return;
+  }
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(TAG, "Channel %d not found for filters reset YAML", this->channel_type_);
+    return;
+  }
+  channel->reset_filters_to_yaml();
 }
 
 }  // namespace pool_station

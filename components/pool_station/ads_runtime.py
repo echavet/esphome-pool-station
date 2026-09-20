@@ -1,8 +1,9 @@
-"""Lot A ADS overlay helpers — no ESPHome imports.
+"""Lot A/B ADS overlay + filter runtime helpers — no ESPHome imports.
 
-Mirrors ads_runtime.h (FSR table, hysteresis, PGA labels) so unit tests
-can lock the contract without compiling firmware. Also validates that
-``ads:`` is only used with a native ADS1115Sensor source.
+Mirrors ads_runtime.h (FSR table, hysteresis, PGA labels, filter clamps,
+sidecar stamp) so unit tests can lock the contract without compiling
+firmware. Also validates that ``ads:`` is only used with a native
+ADS1115Sensor source.
 """
 
 from __future__ import annotations
@@ -71,6 +72,51 @@ ADS_OVERLAY_SOURCE_ERROR = (
 
 RUNTIME_PREFS_MAGIC = 0xA0511115
 CALIBRATION_PREFS_MAGIC = 0xCA110005
+
+RT_FLAG_HAS_VMIN = 0x01
+RT_FLAG_HAS_VMAX = 0x02
+RT_FLAG_HAS_GAIN = 0x04
+
+FILTER_SAMPLES_MAX = 20
+MAX_JUMP_STREAK_MIN = 1
+MAX_JUMP_STREAK_MAX = 10
+UPDATE_INTERVAL_S_MIN = 1
+UPDATE_INTERVAL_S_MAX = 3600
+UPDATE_INTERVAL_MS_MIN = 1000
+UPDATE_INTERVAL_MS_MAX = 3600 * 1000
+
+# Must match ads_runtime.h FilterRuntimeNumberKind
+FILTER_RT_SAMPLES = 0
+FILTER_RT_MAX_JUMP = 1
+FILTER_RT_MAX_JUMP_STREAK = 2
+FILTER_RT_VALUE_MIN = 3
+FILTER_RT_VALUE_MAX = 4
+FILTER_RT_UPDATE_INTERVAL_S = 5
+
+# Design §4.1: max_jump number step by channel (pH 0.05, ORP 1, bar 0.01)
+FILTER_NUMBER_SPECS = {
+    "pressure": {
+        "jump_step": 0.01,
+        "jump_max": 20.0,
+        "value_min": -1.0,
+        "value_max": 20.0,
+        "clamp_step": 0.01,
+    },
+    "ph": {
+        "jump_step": 0.05,
+        "jump_max": 14.0,
+        "value_min": 0.0,
+        "value_max": 14.0,
+        "clamp_step": 0.05,
+    },
+    "orp": {
+        "jump_step": 1.0,
+        "jump_max": 2000.0,
+        "value_min": -2000.0,
+        "value_max": 2000.0,
+        "clamp_step": 1.0,
+    },
+}
 
 # Packed sidecar: 4 + 6 + 2 pad + 3*4 + 4 + 4 = 32 (floats at offset 12).
 CHANNEL_RUNTIME_PREFS_SIZE = 32
@@ -189,6 +235,245 @@ def id_type_name(source_id):
         if isinstance(value, str) and value:
             return value
     return str(type_obj)
+
+
+def is_managed_u8(value):
+    return value is not None and int(value) != GAIN_UNMANAGED
+
+
+def is_managed_float(value):
+    if value is None:
+        return False
+    try:
+        return not math.isnan(value)
+    except TypeError:
+        return True
+
+
+def is_managed_interval_ms(ms):
+    return ms is not None and int(ms) != 0
+
+
+def clamp_bounds_valid(vmin, vmax):
+    """NAN / missing bounds are unbounded; inverted finite min>max is invalid."""
+    if vmin is None or vmax is None:
+        return True
+    try:
+        if math.isnan(vmin) or math.isnan(vmax):
+            return True
+    except TypeError:
+        return True
+    return float(vmin) <= float(vmax)
+
+
+def sanitize_update_interval_ms(ms, ha_range=True):
+    """HA apply uses 1–3600 s. YAML / NVS restore may keep a shorter seed."""
+    ms = int(ms)
+    if ha_range:
+        return clamp_update_interval_ms(ms)
+    if ms > UPDATE_INTERVAL_MS_MAX:
+        return UPDATE_INTERVAL_MS_MAX
+    return ms
+
+
+def validate_filter_runtime_seeds(filters_conf):
+    """Return an error string or None. runtime value_min/max need YAML seeds."""
+    if not filters_conf:
+        return None
+    if "value_min" in filters_conf and "value_max" in filters_conf:
+        if not clamp_bounds_valid(filters_conf.get("value_min"), filters_conf.get("value_max")):
+            return "filters.value_min must be <= filters.value_max (clamp bounds)"
+    rt = filters_conf.get("runtime")
+    if not rt:
+        return None
+    if "value_min" in rt and "value_min" not in filters_conf:
+        return (
+            "filters.runtime.value_min requires filters.value_min YAML seed "
+            "(omit both to leave clamp off; NAN cannot be a HA number)"
+        )
+    if "value_max" in rt and "value_max" not in filters_conf:
+        return (
+            "filters.runtime.value_max requires filters.value_max YAML seed "
+            "(omit both to leave clamp off; NAN cannot be a HA number)"
+        )
+    return None
+
+
+def clamp_filter_samples(n):
+    n = int(n)
+    if n < 0:
+        return 0
+    if n > FILTER_SAMPLES_MAX:
+        return FILTER_SAMPLES_MAX
+    return n
+
+
+def clamp_max_jump_streak(s):
+    s = int(s)
+    if s < MAX_JUMP_STREAK_MIN:
+        return MAX_JUMP_STREAK_MIN
+    if s > MAX_JUMP_STREAK_MAX:
+        return MAX_JUMP_STREAK_MAX
+    return s
+
+
+def clamp_max_jump(j):
+    j = float(j)
+    if math.isnan(j) or j < 0.0:
+        return 0.0
+    return j
+
+
+def clamp_update_interval_ms(ms):
+    ms = int(ms)
+    if ms < UPDATE_INTERVAL_MS_MIN:
+        return UPDATE_INTERVAL_MS_MIN
+    if ms > UPDATE_INTERVAL_MS_MAX:
+        return UPDATE_INTERVAL_MS_MAX
+    return ms
+
+
+def merge_nvs_filters(yaml_filters, nvs, persist=True, persist_filters=None, persist_interval=None):
+    """YAML seeds; NVS wins per managed field when persist is on.
+
+    Unmanaged sentinels (0xFF / NAN / interval 0) keep the YAML seed so a
+    Lot A-only sidecar does not wipe Lot 3 filter defaults. HAS_VMIN/HAS_VMAX
+    without a finite value are treated as unmanaged (do not disable YAML clamp).
+    """
+    if persist_filters is None:
+        persist_filters = persist
+    if persist_interval is None:
+        persist_interval = persist
+    out = dict(yaml_filters)
+    if not nvs:
+        return out
+    if persist_filters:
+        if is_managed_u8(nvs.get("filter_samples")):
+            out["filter_samples"] = clamp_filter_samples(nvs["filter_samples"])
+        if is_managed_float(nvs.get("max_jump")):
+            out["max_jump"] = clamp_max_jump(nvs["max_jump"])
+        if is_managed_u8(nvs.get("max_jump_streak")):
+            out["max_jump_streak"] = clamp_max_jump_streak(nvs["max_jump_streak"])
+        flags = int(nvs.get("flags", 0))
+        if (flags & RT_FLAG_HAS_VMIN) and is_managed_float(nvs.get("value_min")):
+            out["value_min"] = nvs.get("value_min")
+        if (flags & RT_FLAG_HAS_VMAX) and is_managed_float(nvs.get("value_max")):
+            out["value_max"] = nvs.get("value_max")
+    if persist_interval and is_managed_interval_ms(nvs.get("update_interval_ms")):
+        out["update_interval_ms"] = sanitize_update_interval_ms(
+            nvs["update_interval_ms"], ha_range=False
+        )
+    return out
+
+
+def stamp_runtime_prefs(cache, live, stamp_filters=False, stamp_interval=False, ads_overlay=False):
+    """Mirror save_runtime_preferences: start from cache, stamp only requested fields.
+
+    Gain Save / remember_gain pass stamp_filters=False so unmanaged Lot B
+    sentinels stay unmanaged (design §4.2: Save cal does not write filters).
+    """
+    out = dict(cache)
+    out["magic"] = RUNTIME_PREFS_MAGIC
+    out["version"] = 1
+    flags = int(out.get("flags", 0))
+    if ads_overlay:
+        out["ads_gain"] = live.get("ads_gain", out.get("ads_gain", GAIN_UNMANAGED))
+        flags |= RT_FLAG_HAS_GAIN
+        out["gain_at_last_cal_save"] = live.get(
+            "gain_at_last_cal_save", out.get("gain_at_last_cal_save", GAIN_UNMANAGED)
+        )
+    if stamp_filters:
+        out["filter_samples"] = clamp_filter_samples(live["filter_samples"])
+        out["max_jump_streak"] = clamp_max_jump_streak(live["max_jump_streak"])
+        out["max_jump"] = clamp_max_jump(live["max_jump"])
+        if is_managed_float(live.get("value_min")):
+            flags |= RT_FLAG_HAS_VMIN
+            out["value_min"] = live["value_min"]
+        else:
+            flags &= ~RT_FLAG_HAS_VMIN
+            out["value_min"] = math.nan
+        if is_managed_float(live.get("value_max")):
+            flags |= RT_FLAG_HAS_VMAX
+            out["value_max"] = live["value_max"]
+        else:
+            flags &= ~RT_FLAG_HAS_VMAX
+            out["value_max"] = math.nan
+    if stamp_interval:
+        out["update_interval_ms"] = live["update_interval_ms"]
+    out["flags"] = flags
+    return out
+
+
+def pack_runtime_prefs(fields):
+    """Pack ChannelRuntimePrefsData with the Lot A/B 32-byte layout."""
+    import struct
+
+    return struct.pack(
+        CHANNEL_RUNTIME_PREFS_FORMAT,
+        int(fields.get("magic", RUNTIME_PREFS_MAGIC)),
+        int(fields.get("version", 1)),
+        int(fields.get("ads_gain", GAIN_UNMANAGED)),
+        int(fields.get("ads_sps", GAIN_UNMANAGED)),
+        int(fields.get("filter_samples", GAIN_UNMANAGED)),
+        int(fields.get("max_jump_streak", GAIN_UNMANAGED)),
+        int(fields.get("flags", 0)),
+        float(fields.get("max_jump", math.nan)),
+        float(fields.get("value_min", math.nan)),
+        float(fields.get("value_max", math.nan)),
+        int(fields.get("update_interval_ms", 0)),
+        int(fields.get("gain_at_last_cal_save", GAIN_UNMANAGED)),
+        0,
+        0,
+        0,
+    )
+
+
+def unpack_runtime_prefs(blob):
+    """Unpack a 32-byte sidecar. Keys match ChannelRuntimePrefsData."""
+    import struct
+
+    unpacked = struct.unpack(CHANNEL_RUNTIME_PREFS_FORMAT, blob)
+    return {
+        "magic": unpacked[0],
+        "version": unpacked[1],
+        "ads_gain": unpacked[2],
+        "ads_sps": unpacked[3],
+        "filter_samples": unpacked[4],
+        "max_jump_streak": unpacked[5],
+        "flags": unpacked[6],
+        "max_jump": unpacked[7],
+        "value_min": unpacked[8],
+        "value_max": unpacked[9],
+        "update_interval_ms": unpacked[10],
+        "gain_at_last_cal_save": unpacked[11],
+    }
+
+
+class SlidingWindow:
+    """Python mirror of channel_filter SlidingWindow (set_size clears)."""
+
+    def __init__(self):
+        self.size = 0
+        self.head = 0
+        self.count = 0
+        self.buffer = []
+
+    def set_size(self, size):
+        self.size = int(size)
+        self.buffer = [math.nan] * self.size
+        self.head = 0
+        self.count = 0
+
+    def push(self, value):
+        if self.size == 0:
+            return
+        self.buffer[self.head] = value
+        self.head = (self.head + 1) % self.size
+        if self.count < self.size:
+            self.count += 1
+
+    def is_full(self):
+        return self.count >= self.size and self.size > 0
 
 
 def ads_overlay_source_error(has_ads_block, source_type_name):

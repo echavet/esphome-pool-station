@@ -38,7 +38,7 @@ class SlidingWindow {
   void push(float value);
   void clear();
   
-  bool is_full() const { return this->count_ >= this->size_; }
+  bool is_full() const { return this->size_ > 0 && this->count_ >= this->size_; }
   size_t count() const { return this->count_; }
   
   float median() const;

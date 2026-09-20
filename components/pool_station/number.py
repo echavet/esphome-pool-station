@@ -37,6 +37,9 @@ DFRobotMidNumber = pool_station_ns.class_(
 DFRobotOffsetNumber = pool_station_ns.class_(
     "DFRobotOffsetNumber", number.Number, cg.Component
 )
+FilterRuntimeNumber = pool_station_ns.class_(
+    "FilterRuntimeNumber", number.Number, cg.Component
+)
 
 # Configuration keys
 CONF_CHANNEL = "channel"

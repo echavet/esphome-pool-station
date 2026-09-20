@@ -1,3 +1,52 @@
+## [0.10.0] - 2026-09-20
+
+### Added — Lot B: runtime Lot 3 filters + channel interval
+
+HA-tunable overlay on existing Lot 3 setters (`set_filter_samples`,
+`set_max_jump`, …). Does **not** own the ADS, change clamp→reject, or
+move filters into the Capturer draft. Lot C remains NO-GO.
+
+Per channel, opt-in:
+
+- `filters.runtime:` numbers for `filter_samples` (0–20), `max_jump`,
+  `max_jump_streak` (1–10), `value_min` / `value_max` (still **clamp**)
+- `filters.runtime.reset_yaml_button` restores YAML seeds (RAM + NVS)
+- `update_interval_number` (1–3600 s) for the **channel** throttle only
+  (cal-mode ~1 s stays prior; ADS `update_interval` is not changed)
+- `apply_*_runtime` resize the median window (`set_size` clears) and
+  reset `JumpGuard` — codegen `set_filter_*` stay config-only
+- Same sidecar NVS `ps-md5-rt-v1` / magic `0xA0511115` as Lot A.
+  Unmanaged sentinels (`0xFF` / `NAN` / interval `0`) keep YAML so a
+  Lot A-only blob does not wipe filters.
+  **Calibration key `ps-md5-v1` and magic `0xCA110005` are unchanged**
+- YAML seeds; NVS wins after the first HA apply / reboot
+- Filters are **not** locked in Calibration Mode (median/jump already
+  bypass). Changing a number does **not** dirty Capturer draft / Save
+- Lot 8 still samples **pre-`max_jump`** (`compensated`)
+
+Without `filters.runtime` / `update_interval_number`: existing YAML is
+unchanged (zero new entities). `filters:` seeds still apply as Lot 3.
+
+### Fixed — Lot B review (same PR, no version bump)
+
+- Save cal / `apply_gain_runtime` no longer stamp unmanaged filter or
+  interval fields (design §4.2: Save does not write filters)
+- Sidecar `alignas(4)` so Lot B float fields cannot fault on ESP32-C3/C6
+  (32-byte Lot A layout unchanged)
+- `HAS_VMIN` / `HAS_VMAX` require a finite value (NAN does not wipe YAML)
+- Inverted `value_min` > `value_max` apply is refused
+- `reset_yaml` restores a YAML `update_interval` below 1 s (HA still 1–3600)
+- Median `set_size` / JumpGuard reset skipped when the size or jump is unchanged
+- `SlidingWindow::is_full()` is false when size is 0
+- `filters.runtime.value_min/max` require the YAML clamp seed
+- Non-finite HA number values are ignored
+- Lot B numbers default to `mode: box`
+
+See [MIGRATION.md](docs/MIGRATION.md#runtime-filters-lot-b-v0100) and
+[DESIGN-RUNTIME-ADS-AND-FILTERS.md](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md).
+
+---
+
 ## [0.9.0] - 2026-09-20
 
 ### Added — Lot A: runtime ADS1115 gain + saturation
@@ -5,7 +54,7 @@
 Opt-in overlay on the existing compose model (`source_id` → native
 `platform: ads1115`). Does **not** rewrite the ADC driver, expose mux, or
 own scheduling (Lot C remains NO-GO). Lot B dynamic filters are not in
-this release.
+this release (see 0.10.0).
 
 Per channel with `ads:`:
 

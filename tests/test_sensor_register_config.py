@@ -64,7 +64,12 @@ class SensorRegisterConfigTest(unittest.TestCase):
                 "max_jump_streak": 3,
                 "value_min": 0.0,
                 "value_max": 14.0,
+                "runtime": {
+                    "persist": True,
+                    "filter_samples": {"name": "pH Median Samples"},
+                },
             },
+            "update_interval_number": {"name": "pH Interval (s)"},
             "calibration": {"type": "linear"},
         }
 
@@ -79,6 +84,10 @@ class SensorRegisterConfigTest(unittest.TestCase):
         self.assertEqual(entity_conf["id"], "ph_channel")
         # Original conf is unchanged so set_filter_* can still run
         self.assertEqual(ch_conf["filters"]["filter_samples"], 5)
+        self.assertIn("runtime", ch_conf["filters"])
+        # update_interval_number is pool_station-only and is not a sensor-core
+        # collision; it may remain on the copy (core ignores unknown keys).
+        self.assertIn("update_interval_number", entity_conf)
         self.assertIsNot(entity_conf, ch_conf)
 
     def test_no_filters_key_is_passthrough_copy(self):
@@ -140,6 +149,7 @@ class SensorRegisterConfigTest(unittest.TestCase):
             "gate",
             "sample_when",
             "ads",
+            "update_interval_number",
         }
         collisions = sensor_core_keys & pool_station_only_channel_keys
         self.assertEqual(collisions, {"filters"})
