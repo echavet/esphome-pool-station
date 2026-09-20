@@ -34,6 +34,9 @@ helper = _load_helper()
 GOLDEN_POOL_PRESSURE = int.from_bytes(
     hashlib.md5(b"ps-md5-v1:pool:0").digest()[:4], "big"
 )
+GOLDEN_RUNTIME_POOL_PRESSURE = int.from_bytes(
+    hashlib.md5(b"ps-md5-rt-v1:pool:0").digest()[:4], "big"
+)
 
 
 class PrefsKeyTest(unittest.TestCase):
@@ -84,8 +87,31 @@ class PrefsKeyTest(unittest.TestCase):
         with open(INIT_PATH, encoding="utf-8") as handle:
             source = handle.read()
         self.assertIn("from .prefs_key import generate_preferences_key", source)
+        self.assertIn("generate_runtime_preferences_key", source)
         self.assertNotIn("hash((base_key, channel_type))", source)
         self.assertNotIn("PYTHONHASHSEED", source.split("generate_preferences_key")[0][-80:])
+
+    def test_runtime_scheme_prefix(self):
+        self.assertEqual(helper.RUNTIME_PREFS_KEY_SCHEME, "ps-md5-rt-v1")
+        self.assertEqual(helper.PREFS_KEY_SCHEME, "ps-md5-v1")
+
+    def test_runtime_key_differs_from_cal_key(self):
+        cal = helper.generate_preferences_key("pool", 0)
+        runtime = helper.generate_runtime_preferences_key("pool", 0)
+        self.assertEqual(cal, GOLDEN_POOL_PRESSURE)
+        self.assertEqual(GOLDEN_POOL_PRESSURE, 0x867CA26C)
+        self.assertEqual(runtime, GOLDEN_RUNTIME_POOL_PRESSURE)
+        self.assertNotEqual(cal, runtime)
+
+    def test_runtime_key_deterministic_and_per_channel(self):
+        a = helper.generate_runtime_preferences_key("pool", 1)
+        b = helper.generate_runtime_preferences_key("pool", 1)
+        self.assertEqual(a, b)
+        keys = [
+            helper.generate_runtime_preferences_key("pool", ch) for ch in (0, 1, 2)
+        ]
+        self.assertEqual(len(set(keys)), 3)
+        self.assertLessEqual(keys[0], 0xFFFFFFFF)
 
 
 if __name__ == "__main__":

@@ -167,10 +167,11 @@ class AlgorithmSelectOptionsTest(unittest.TestCase):
             options_args,
         )
 
-    def test_only_one_register_select_in_component(self):
+    def test_register_select_count_is_algo_plus_ads_gain(self):
         with open(INIT_PATH, encoding="utf-8") as handle:
             source = handle.read()
-        self.assertEqual(source.count("register_select("), 1)
+        # Lot 7 algorithm select + Lot A ADS gain select. Neither may be empty.
+        self.assertEqual(source.count("register_select("), 2)
 
     def test_cpp_set_options_are_channel_aware(self):
         with open(CPP_PATH, encoding="utf-8") as handle:

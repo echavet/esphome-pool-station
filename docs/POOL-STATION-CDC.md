@@ -1,7 +1,7 @@
 # Pool Station — Cahier des Charges (CDC)
 
-> Version: 0.8.1 (Lot 8 — détection d'interférences station, pas EZO)  
-> Date: 2026-09-15  
+> Version: 0.9.0 (Lot A — gain ADS runtime + saturation, compose)  
+> Date: 2026-09-20  
 > Auteur: @echavet
 
 ## 1. Vision
@@ -125,6 +125,7 @@
 | F-HA-05 | Runtime algorithm selection | 7 | ✅ Done |
 | F-HA-06 | Draft/Save workflow (Save=commit, Discard, draft_pending, draft_invalid) | 7 | ✅ Done |
 | F-HA-07 | Add/remove calibration points | 7 | ✅ Done |
+| F-HA-08 | Select gain ADS runtime + alarme saturation ≥ 98 % FSR (opt-in `ads:`) | A | ✅ Done |
 
 ### F-INT : Détection d'interférences (station)
 
@@ -187,8 +188,10 @@ Indicateurs de *suspicion*, pas un diagnostic chimique. Opt-in YAML `interferenc
 | 5 | Water temp compensation (Tw) | ✅ Done |
 | 6 | Gates/campaigns | ✅ Done |
 | 7 | HA polish, runtime algo select, draft/Save dirty UX | ✅ Done |
-| **8** | **Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw)** | ✅ **Current** |
-| **A/B** | Runtime ADS gain + saturation ; filtres HA-tunables | 📝 Design — [DESIGN-RUNTIME-ADS-AND-FILTERS.md](DESIGN-RUNTIME-ADS-AND-FILTERS.md) |
+| **8** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ Done |
+| **A** | **Runtime ADS gain + saturation (compose, pas ownership)** | ✅ **Current** |
+| **B** | Filtres Lot 3 + intervalle canal HA-tunables | Plus tard |
+| **C** | Ownership / rewrite driver ADS | NO-GO |
 
 ## 8. Critères d'acceptation
 

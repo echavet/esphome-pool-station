@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/core/preferences.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -12,6 +13,10 @@
 #include "measurement_gate.h"
 #include "measurement_campaign.h"
 #include "interference_detector.h"
+#include "ads_runtime.h"
+#ifdef USE_ADS1115
+#include "esphome/components/ads1115/sensor/ads1115_sensor.h"
+#endif
 #include <vector>
 #include <map>
 #include <functional>
@@ -96,6 +101,12 @@ class InterferenceSuspectedSensor;
 class InterferenceCoincidentJumpSensor;
 class InterferenceSharedNoiseSensor;
 class InterferenceTwCouplingSensor;
+
+// Lot A: runtime ADS gain / saturation overlay
+class AdsGainSelect;
+class AdsSaturatedBinarySensor;
+class AdsGainMismatchSensor;
+class AdsResetYamlButton;
 
 /**
  * Main pool_station component.
@@ -356,6 +367,35 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   // Lot 7: Draft mode configuration
   void set_draft_mode_enabled(bool enabled);
 
+  // Lot A: runtime ADS overlay (opt-in). Does not own the ADC driver.
+  void set_ads1115_sensor(sensor::Sensor *sensor);
+  void set_ads_overlay_enabled(bool enabled);
+  void set_ads_yaml_gain(uint8_t gain_code) { this->yaml_gain_ = gain_code; }
+  void set_saturation_on(float ratio) { this->sat_on_ = ratio; }
+  void set_saturation_off(float ratio) { this->sat_off_ = ratio; }
+  void set_saturation_hold_ms(uint32_t ms) { this->sat_hold_ms_ = ms; }
+  void set_runtime_preferences_key(uint32_t key);
+  void set_gain_select(AdsGainSelect *sel) { this->gain_select_ = sel; }
+  void set_saturated_sensor(AdsSaturatedBinarySensor *sensor) { this->saturated_sensor_ = sensor; }
+  void set_fsr_percent_sensor(sensor::Sensor *sensor) { this->fsr_percent_sensor_ = sensor; }
+  void set_gain_mismatch_sensor(AdsGainMismatchSensor *sensor) { this->gain_mismatch_sensor_ = sensor; }
+
+  void apply_gain_runtime(uint8_t gain_code, bool persist = true);
+  void reset_ads_to_yaml();
+  void load_runtime_preferences();
+  void save_runtime_preferences();
+  void remember_gain_at_cal_save();
+
+  float get_fsr_volts() const;
+  float get_fsr_percent(float raw_v) const;
+  bool is_adc_saturated(float raw_v) const;
+  bool is_adc_saturated() const { return this->is_adc_saturated(this->last_raw_value_); }
+  bool refuse_calibration_save_if_saturated() const;
+  uint8_t get_gain_shadow() const { return this->gain_shadow_; }
+  float get_saturation_on() const { return this->sat_on_; }
+  bool is_ads_overlay_enabled() const { return this->ads_overlay_enabled_; }
+  bool is_gain_mismatch() const;
+
   // Accessors
   ChannelType get_channel_type() const { return this->channel_type_; }
   const char *get_channel_type_name() const;
@@ -429,6 +469,37 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   // Gate (Lot 6)
   MeasurementGate *gate_{nullptr};
   GateBlockedBinarySensor *gate_blocked_sensor_{nullptr};
+
+  // Lot A: ADS overlay + sidecar NVS (not CalibrationPrefsData)
+  void apply_ads_gain_to_source_();
+  void ensure_runtime_prefs_obj_();
+  void update_saturation_(uint32_t now);
+  void expire_saturation_hold_(uint32_t now);
+  void publish_ads_ui_();
+  void publish_gain_mismatch_();
+
+  bool ads_overlay_enabled_{false};
+#ifdef USE_ADS1115
+  ads1115::ADS1115Sensor *ads_{nullptr};
+#endif
+  uint8_t yaml_gain_{ads_runtime::GAIN_DEFAULT};
+  uint8_t gain_shadow_{ads_runtime::GAIN_DEFAULT};
+  uint8_t gain_at_last_cal_save_{ads_runtime::GAIN_UNMANAGED};
+  float sat_on_{ads_runtime::SAT_ON_DEFAULT};
+  float sat_off_{ads_runtime::SAT_OFF_DEFAULT};
+  uint32_t sat_hold_ms_{ads_runtime::SAT_HOLD_MS_DEFAULT};
+  bool sat_raw_latched_{false};
+  bool sat_published_{false};
+  uint32_t sat_last_on_ms_{0};
+  uint32_t runtime_prefs_key_{0};
+  bool runtime_prefs_obj_ready_{false};
+  bool runtime_prefs_loaded_{false};
+  ads_runtime::ChannelRuntimePrefsData runtime_prefs_cache_{};
+  ESPPreferenceObject runtime_prefs_;
+  AdsGainSelect *gain_select_{nullptr};
+  AdsSaturatedBinarySensor *saturated_sensor_{nullptr};
+  sensor::Sensor *fsr_percent_sensor_{nullptr};
+  AdsGainMismatchSensor *gain_mismatch_sensor_{nullptr};
 };
 
 

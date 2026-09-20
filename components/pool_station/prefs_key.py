@@ -11,6 +11,10 @@ Scheme ``ps-md5-v1`` is intentionally versioned. If the payload format changes,
 bump the prefix and document a one-time recalibration in CHANGELOG / MIGRATION.
 Old PYTHONHASHSEED keys cannot be reconstructed, so v0.7.16 cannot migrate
 them automatically.
+
+Lot A runtime tunables use a **separate** scheme ``ps-md5-rt-v1`` so a
+same-size NVS blob cannot collide with calibration. Do not bump
+``ps-md5-v1`` / magic ``0xCA110005`` when adding runtime fields.
 """
 
 from __future__ import annotations
@@ -19,6 +23,11 @@ import hashlib
 
 # Bump this prefix if the payload format changes.
 PREFS_KEY_SCHEME = "ps-md5-v1"
+
+# Lot A runtime sidecar (gain / later filters). Separate scheme so a
+# same-size blob cannot collide with calibration prefs (ps-md5-v1).
+# Do not bump PREFS_KEY_SCHEME when changing this.
+RUNTIME_PREFS_KEY_SCHEME = "ps-md5-rt-v1"
 
 
 def generate_preferences_key(base_key, channel_type):
@@ -33,5 +42,18 @@ def generate_preferences_key(base_key, channel_type):
         uint32 (0 .. 0xFFFFFFFF) suitable for ``set_preferences_key``.
     """
     payload = f"{PREFS_KEY_SCHEME}:{base_key}:{int(channel_type)}".encode("utf-8")
+    digest = hashlib.md5(payload).digest()
+    return int.from_bytes(digest[:4], byteorder="big")
+
+
+def generate_runtime_preferences_key(base_key, channel_type):
+    """Return a deterministic 32-bit key for the Lot A/B runtime sidecar.
+
+    Payload: ``ps-md5-rt-v1:{component_id}:{channel_type}``. Always distinct
+    from ``generate_preferences_key`` for the same inputs.
+    """
+    payload = f"{RUNTIME_PREFS_KEY_SCHEME}:{base_key}:{int(channel_type)}".encode(
+        "utf-8"
+    )
     digest = hashlib.md5(payload).digest()
     return int.from_bytes(digest[:4], byteorder="big")

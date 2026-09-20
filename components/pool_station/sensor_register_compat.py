@@ -24,7 +24,7 @@ can be unit-tested without a full ESPHome install.
 # Scan vs channel_schema() extra keys:
 #   source_id, update_interval, raw_sensor, calibrated_sensor, calibration,
 #   filters, diagnostics, temperature_compensation, capturer, cal_invalid,
-#   calibration_temp_sensor, gate, sample_when
+#   calibration_temp_sensor, gate, sample_when, ads
 #
 # ESPHome sensor core reads (among entity metadata):
 #   device_class, state_class, unit_of_measurement, accuracy_decimals,

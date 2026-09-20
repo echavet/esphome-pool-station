@@ -20,3 +20,7 @@ pool_station_ns = cg.esphome_ns.namespace("pool_station")
 CalibrationAlgorithmSelect = pool_station_ns.class_(
     "CalibrationAlgorithmSelect", select.Select, cg.Component
 )
+
+AdsGainSelect = pool_station_ns.class_(
+    "AdsGainSelect", select.Select, cg.Component
+)
