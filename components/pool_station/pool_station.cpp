@@ -444,9 +444,6 @@ void PoolStationChannelSensor::setup() {
              this->diagnostics_config_.noise_warn_sigma,
              this->diagnostics_config_.stuck_timeout_ms);
   }
-
-  // NVS deferred flush (v0.10.4): register shutdown hook for best-effort save
-  this->register_shutdown_hook_();
 }
 
 void PoolStationChannelSensor::loop() {
@@ -1033,22 +1030,12 @@ void PoolStationChannelSensor::flush_nvs_now_() {
   this->nvs_pending_stamp_interval_ = false;
 }
 
-void PoolStationChannelSensor::register_shutdown_hook_() {
-  if (this->nvs_shutdown_hook_registered_) {
-    return;
+void PoolStationChannelSensor::on_shutdown() {
+  if (this->nvs_dirty_) {
+    ESP_LOGI(TAG, "Channel %s: shutdown — flushing pending NVS prefs",
+             this->get_channel_type_name());
+    this->flush_nvs_now_();
   }
-  if (this->runtime_prefs_key_ == 0) {
-    return;
-  }
-  PoolStationChannelSensor *self = this;
-  App.register_shutdown_hook([self]() {
-    if (self->nvs_dirty_) {
-      ESP_LOGI(TAG, "Channel %s: shutdown — flushing pending NVS prefs",
-               self->get_channel_type_name());
-      self->flush_nvs_now_();
-    }
-  });
-  this->nvs_shutdown_hook_registered_ = true;
 }
 
 void PoolStationChannelSensor::apply_filter_samples_runtime(uint8_t n, bool persist) {
