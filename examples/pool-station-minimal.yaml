@@ -1,4 +1,4 @@
-# Pool Station — Example Configuration (Lot 8)
+# Pool Station — Example Configuration (Lot 8 + Lot A)
 # 
 # This configuration demonstrates Lots 2-8 features:
 #   - N-point calibration with multiple algorithms
@@ -15,6 +15,7 @@
 #   - Lot 7: Add/remove calibration points
 #   - Lot 7: Draft/Save workflow
 #   - Lot 8: Station-level interference detection (orp↔pressure, ph↔orp)
+#   - Lot A: Runtime ADS gain select + saturation alarm (opt-in ads:)
 #
 # Hardware reference (Eric prod):
 #   - DIYables ESP32-S3 UNO
@@ -215,6 +216,21 @@ pool_station:
       icon: "mdi:gauge"
       update_interval: 2s
       
+      # Lot A: runtime PGA (0–5 V isolator → 6.144). NVS wins after HA change.
+      # Changing gain does not rescale calibration volts.
+      ads:
+        gain: 6.144
+        gain_select:
+          name: "Pressure ADS Gain"
+        saturated:
+          name: "Pressure ADC Saturated"
+        fsr_percent:
+          name: "Pressure ADC % FSR"
+        gain_mismatch:
+          name: "Pressure Gain vs Calibration"
+        reset_yaml_button:
+          name: "Pressure Gain YAML"
+
       # Raw voltage diagnostic sensor (always exposed)
       raw_sensor:
         name: "Filter Pressure Raw"
@@ -284,6 +300,24 @@ pool_station:
       icon: "mdi:ph"
       update_interval: 60s
       
+      # Lot A: HA-tunable gain. A 4.094 V rail @ 4.096 is 99.95 % FSR —
+      # saturated would be ON; switch to 6.144 from HA without OTA.
+      ads:
+        gain: 6.144
+        saturation_on: 0.98
+        saturation_off: 0.95
+        hold_time: 15s
+        gain_select:
+          name: "Pool pH ADS Gain"
+        saturated:
+          name: "Pool pH ADC Saturated"
+        fsr_percent:
+          name: "Pool pH ADC % FSR"
+        gain_mismatch:
+          name: "Pool pH Gain vs Calibration"
+        reset_yaml_button:
+          name: "Pool pH Gain YAML"
+
       # Raw voltage diagnostic sensor (post-median filtered value)
       raw_sensor:
         name: "Pool pH Raw"
@@ -419,6 +453,19 @@ pool_station:
       accuracy_decimals: 0
       icon: "mdi:flash"
       update_interval: 60s
+
+      ads:
+        gain: 6.144
+        gain_select:
+          name: "Pool ORP ADS Gain"
+        saturated:
+          name: "Pool ORP ADC Saturated"
+        fsr_percent:
+          name: "Pool ORP ADC % FSR"
+        gain_mismatch:
+          name: "Pool ORP Gain vs Calibration"
+        reset_yaml_button:
+          name: "Pool ORP Gain YAML"
       
       raw_sensor:
         name: "Pool ORP Raw"

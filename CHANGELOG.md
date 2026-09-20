@@ -1,3 +1,37 @@
+## [0.9.0] - 2026-09-20
+
+### Added — Lot A: runtime ADS1115 gain + saturation
+
+Opt-in overlay on the existing compose model (`source_id` → native
+`platform: ads1115`). Does **not** rewrite the ADC driver, expose mux, or
+own scheduling (Lot C remains NO-GO). Lot B dynamic filters are not in
+this release.
+
+Per channel with `ads:`:
+
+- HA `select` for PGA (`6.144`, `4.096`, `2.048`, `1.024`, `0.512`, `0.256`)
+- Typed overlay: `static_cast<ADS1115Sensor*>` after config validation
+  (non-ADS `source_id` + `ads:` is a YAML error, not a silent cast)
+- Shadow gain (upstream has setters, no getters)
+- `binary_sensor` saturation: ON at ≥ 98 % of current FSR, OFF at ≤ 95 %,
+  `hold_time` 15 s (uses **pre-median** `last_raw_value_`)
+- Optional `% FSR` diagnostic and `gain_mismatch` (current ≠ gain at last
+  successful calibration Save; `0xFF` / never saved → OFF)
+- Soft-lock: gain select / reset YAML refused while Calibration Mode is ON
+- Save / Commit refused if the current raw is saturated (rail is not a
+  measurement). Capture logs a warning, no hard-block (MVP)
+- Sidecar NVS `ps-md5-rt-v1` / magic `0xA0511115` — **calibration key
+  `ps-md5-v1` and magic `0xCA110005` are unchanged**
+- YAML `ads.gain` is the seed; NVS wins after the first HA apply / reboot
+- Changing gain does **not** rescale calibration X/Y (cal is in volts)
+
+Without `ads:`: existing YAML is unchanged (zero new entities).
+
+See [MIGRATION.md](docs/MIGRATION.md#runtime-ads-gain-lot-a-v090) and
+[DESIGN-RUNTIME-ADS-AND-FILTERS.md](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md).
+
+---
+
 ## [0.8.1] - 2026-09-15
 
 ### Fixed — Restore Capturer draft UX entities after v0.8.0
@@ -917,7 +951,10 @@ and the v0.7.15 number `register_component` fix are preserved.
 | 5 | 0.5.0 | ✅ Temperature compensation (Tw) | Done |
 | 6 | 0.6.0 | ✅ Gates/campaigns | Done |
 | **7** | **0.7.18** | ✅ HA polish, runtime algo select, draft/Save dirty UX, Capturer UI sync, Lot-2 review-fix ports | Done |
-| **8** | **0.8.1** | ✅ **Interference detection + restore Capturer draft UX entities** | **Current** |
+| **8** | **0.8.1** | ✅ Interference detection + restore Capturer draft UX entities | Done |
+| **A** | **0.9.0** | ✅ **Runtime ADS gain + saturation (compose overlay)** | **Current** |
+| **B** | — | Dynamic Lot 3 filters + channel interval | Later |
+| **C** | — | ADS ownership / scheduler | NO-GO |
 
 ## Out of scope
 

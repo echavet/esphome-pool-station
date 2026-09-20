@@ -139,6 +139,7 @@ class SensorRegisterConfigTest(unittest.TestCase):
             "calibration_temp_sensor",
             "gate",
             "sample_when",
+            "ads",
         }
         collisions = sensor_core_keys & pool_station_only_channel_keys
         self.assertEqual(collisions, {"filters"})

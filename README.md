@@ -20,6 +20,7 @@
 - **Stable entity IDs**: anti-swap protection by physical address (see [SENSOR-IDENTITY.md](docs/SENSOR-IDENTITY.md))
 - **Brand agnostic**: works with any analog pH/ORP probe
 - **Interference flags**: coincident ORP/pressure jumps, shared pH/ORP noise (Lot 8)
+- **Runtime ADS gain**: change PGA from Home Assistant without OTA; saturation alarm at ~98 % FSR (Lot A)
 
 Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.com/echavet/pool-firmata-wifi).
 
@@ -36,8 +37,35 @@ Designed to replace complex YAML lambdas in [pool-firmata-wifi](https://github.c
 | **Gates/Campaigns** | 6 | ✅ Done | Conditional sampling, measurement campaigns |
 | **HA Polish** | 7 | ✅ Done | Runtime algo select, add/remove points, draft/Save |
 | **Interference Detection** | 8 | ✅ Done | Station-level coincident jump / shared noise / optional pH↔Tw |
+| **Runtime ADS gain** | A | ✅ Done | HA PGA select, saturation ≥98 % FSR, sidecar NVS (compose) |
 
-## Current Status — Lot 8
+## Current Status — Lot A (v0.9.0)
+
+**Lot A** — Runtime ADS1115 gain + saturation (opt-in `ads:` on a channel):
+- ✅ HA `select` for PGA (`6.144` … `0.256`) on pH / ORP / pressure
+- ✅ Typed overlay `ADS1115Sensor*` + shadow (no upstream getter)
+- ✅ `saturated` at ≥ 98 % FSR (hysteresis 95 %, hold 15 s)
+- ✅ Soft-lock while Calibration Mode is ON; Save refused if raw is at the rail
+- ✅ Sidecar NVS `ps-md5-rt-v1` — calibration magic `0xCA110005` unchanged
+- ✅ Changing gain does **not** rescale calibration volts
+- ❌ Lot B (dynamic filters) and Lot C (ADS ownership) are not in this release
+
+Without `ads:` the channel is unchanged. See [MIGRATION](docs/MIGRATION.md#runtime-ads-gain-lot-a-v090).
+
+```yaml
+channels:
+  ph:
+    source_id: ads_ph
+    ads:
+      gain: 6.144              # seed; NVS wins after HA change
+      gain_select:
+        name: "pH Gain ADC"
+      saturated:
+        name: "pH ADC saturé"
+```
+
+Calibration Mode ON locks the select. Save is refused while saturated.
+Changing gain does not rescale Capturer X/Y volts.
 
 **Lot 8** — Station-level interference detection (opt-in, not Atlas EZO):
 - ✅ **Coincident jump** ORP ↔ pressure (pump / EMI); default `jump_window: 90s` covers 60s ORP
@@ -459,8 +487,10 @@ Use calibration mode when:
 | 5 | 0.5.0 | Water temperature compensation (Tw) | ✅ Done |
 | 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
 | **7** | **0.7.18** | HA polish, runtime algo select, draft/Save dirty UX, Lot-2 review-fix ports | ✅ Done |
-| **8** | **0.8.1** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ **Current** |
-| **A/B** | — | Runtime ADS gain + saturation ; dynamic Lot 3 filters | 📝 [Design](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) |
+| **8** | **0.8.1** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ Done |
+| **A** | **0.9.0** | Runtime ADS gain + saturation (compose overlay) | ✅ **Current** |
+| **B** | — | Dynamic Lot 3 filters + channel interval | Later |
+| **C** | — | ADS ownership / scheduler | NO-GO |
 
 ### Lot 8 — Interference detection
 
@@ -745,7 +775,7 @@ Example entities for pH channel:
 
 - [CDC (Cahier des Charges)](docs/POOL-STATION-CDC.md) — Full requirements specification
 - [SENSOR-IDENTITY](docs/SENSOR-IDENTITY.md) — Anti-swap address binding table
-- [DESIGN-RUNTIME-ADS-AND-FILTERS](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) — Design only: runtime ADS gain / saturation + dynamic Lot 3 filters (go/no-go per lot)
+- [DESIGN-RUNTIME-ADS-AND-FILTERS](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) — Lot A implemented in v0.9.0; Lot B later; Lot C NO-GO
 - [CHANGELOG](CHANGELOG.md) — Version history
 - [Examples](examples/) — YAML configuration examples
 

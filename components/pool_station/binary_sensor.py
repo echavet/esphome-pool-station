@@ -28,6 +28,13 @@ CalibrationInvalidSensor = pool_station_ns.class_(
     "CalibrationInvalidSensor", binary_sensor.BinarySensor, cg.Component
 )
 
+AdsSaturatedBinarySensor = pool_station_ns.class_(
+    "AdsSaturatedBinarySensor", binary_sensor.BinarySensor, cg.Component
+)
+AdsGainMismatchSensor = pool_station_ns.class_(
+    "AdsGainMismatchSensor", binary_sensor.BinarySensor, cg.Component
+)
+
 # Configuration keys
 CONF_CHANNEL = "channel"
 

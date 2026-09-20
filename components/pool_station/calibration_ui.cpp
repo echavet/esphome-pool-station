@@ -248,6 +248,11 @@ void CalibrationCaptureButton::press_action() {
     ESP_LOGW(TAG, "Cannot capture: no raw value available for channel %d", this->channel_type_);
     return;
   }
+  if (channel->is_adc_saturated(raw_value)) {
+    ESP_LOGW(TAG,
+             "Capture while ADC saturated (|raw|=%.4f V, FSR=%.3f V) — X may be a rail, not a measurement",
+             raw_value, channel->get_fsr_volts());
+  }
   
   CalibrationEngine *engine = channel->get_calibration_engine();
   if (engine == nullptr) return;
@@ -297,6 +302,14 @@ void CalibrationSaveButton::press_action() {
   CalibrationEngine *engine = channel->get_calibration_engine();
   if (engine == nullptr) return;
 
+  if (channel->refuse_calibration_save_if_saturated()) {
+    ESP_LOGW(TAG,
+             "Save refused: ADC saturated (|raw|>=%.0f%% FSR) for channel %d — live + flash unchanged",
+             100.0f * ads_runtime::SAT_ON_DEFAULT, this->channel_type_);
+    channel->notify_calibration_updated();
+    return;
+  }
+
   // Do not persist an invalid draft (would brick live + flash until re-cal).
   if (engine->is_draft_mode() && !engine->is_draft_valid()) {
     ESP_LOGW(TAG,
@@ -327,6 +340,7 @@ void CalibrationSaveButton::press_action() {
   
   // Update calibration temp sensor if configured
   channel->publish_calibration_temperature();
+  channel->remember_gain_at_cal_save();
   channel->notify_calibration_updated();
   
   if (!std::isnan(water_temp)) {
@@ -598,6 +612,14 @@ void CalibrationCommitButton::press_action() {
     return;
   }
 
+  if (channel->refuse_calibration_save_if_saturated()) {
+    ESP_LOGW(TAG,
+             "Commit refused: ADC saturated (|raw|>=%.0f%% FSR) for channel %d — live unchanged",
+             100.0f * ads_runtime::SAT_ON_DEFAULT, this->channel_type_);
+    channel->notify_calibration_updated();
+    return;
+  }
+
   if (!engine->is_draft_valid()) {
     ESP_LOGW(TAG,
              "Commit refused: draft invalid (type=%s, points=%zu, min=%d) for channel %d — live unchanged",
@@ -617,6 +639,7 @@ void CalibrationCommitButton::press_action() {
   
   engine->commit_draft();
   channel->publish_calibration_temperature();
+  channel->remember_gain_at_cal_save();
   channel->notify_calibration_updated();
   
   ESP_LOGI(TAG, "Committed draft calibration for channel %d", this->channel_type_);
@@ -821,6 +844,111 @@ void DraftInvalidSensor::loop() {
 void DraftInvalidSensor::dump_config() {
   LOG_BINARY_SENSOR("", "Draft Invalid Sensor", this);
   ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+// ============================================================================
+// Lot A: AdsGainSelect
+// ============================================================================
+
+void AdsGainSelect::setup() {
+  ESP_LOGD(TAG, "Setting up AdsGainSelect (channel=%d)", this->channel_type_);
+  // Non-empty options at setup (HA discovery already got them from codegen).
+  this->traits.set_options({"6.144", "4.096", "2.048", "1.024", "0.512", "0.256"});
+  this->update_from_channel();
+}
+
+void AdsGainSelect::dump_config() {
+  LOG_SELECT("", "ADS Gain Select", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+void AdsGainSelect::update_from_channel() {
+  if (this->parent_ == nullptr) {
+    return;
+  }
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    return;
+  }
+  this->publish_state(ads_runtime::gain_code_to_label(channel->get_gain_shadow()));
+}
+
+void AdsGainSelect::control(const std::string &value) {
+  if (this->parent_ == nullptr) {
+    return;
+  }
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(TAG, "Channel %d not found for ADS gain", this->channel_type_);
+    return;
+  }
+  if (this->parent_->is_calibration_mode()) {
+    ESP_LOGW(TAG, "ADS gain change refused: Calibration Mode ON (channel %d) — select unchanged",
+             this->channel_type_);
+    this->publish_state(ads_runtime::gain_code_to_label(channel->get_gain_shadow()));
+    return;
+  }
+  uint8_t code = ads_runtime::gain_label_to_code(value.c_str());
+  if (!ads_runtime::is_valid_gain_code(code)) {
+    ESP_LOGW(TAG, "Unknown ADS gain option '%s' for channel %d", value.c_str(), this->channel_type_);
+    this->publish_state(ads_runtime::gain_code_to_label(channel->get_gain_shadow()));
+    return;
+  }
+  channel->apply_gain_runtime(code, true);
+  this->publish_state(value);
+}
+
+// ============================================================================
+// Lot A: saturation / mismatch / reset YAML
+// ============================================================================
+
+void AdsSaturatedBinarySensor::setup() {
+  ESP_LOGD(TAG, "Setting up AdsSaturatedBinarySensor (channel=%d)", this->channel_type_);
+  this->publish_state(false);
+}
+
+void AdsSaturatedBinarySensor::dump_config() {
+  LOG_BINARY_SENSOR("", "ADS Saturated", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+void AdsGainMismatchSensor::setup() {
+  ESP_LOGD(TAG, "Setting up AdsGainMismatchSensor (channel=%d)", this->channel_type_);
+  bool mismatch = false;
+  if (this->parent_ != nullptr) {
+    PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+    if (channel != nullptr) {
+      mismatch = channel->is_gain_mismatch();
+    }
+  }
+  this->publish_state(mismatch);
+}
+
+void AdsGainMismatchSensor::dump_config() {
+  LOG_BINARY_SENSOR("", "ADS Gain Mismatch", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+void AdsResetYamlButton::dump_config() {
+  LOG_BUTTON("", "ADS Reset YAML Gain", this);
+  ESP_LOGCONFIG(TAG, "  Channel: %d", this->channel_type_);
+}
+
+void AdsResetYamlButton::press_action() {
+  if (this->parent_ == nullptr) {
+    ESP_LOGW(TAG, "ADS reset YAML button has no parent");
+    return;
+  }
+  if (this->parent_->is_calibration_mode()) {
+    ESP_LOGW(TAG, "ADS reset YAML refused: Calibration Mode ON (channel %d)", this->channel_type_);
+    return;
+  }
+  PoolStationChannelSensor *channel = this->parent_->get_channel(this->channel_type_);
+  if (channel == nullptr) {
+    ESP_LOGW(TAG, "Channel %d not found for ADS reset YAML", this->channel_type_);
+    return;
+  }
+  channel->reset_ads_to_yaml();
 }
 
 }  // namespace pool_station

@@ -27,7 +27,14 @@ from esphome.const import (
 from esphome.core import coroutine
 from .sensor_register_compat import sensor_register_config
 from .algorithm_select_options import algorithm_select_options
-from .prefs_key import generate_preferences_key
+from .prefs_key import generate_preferences_key, generate_runtime_preferences_key
+from .ads_runtime import (
+    GAIN_SELECT_OPTIONS,
+    ads_overlay_source_error,
+    gain_float_to_code,
+    id_type_name,
+    source_type_is_ads1115_sensor,
+)
 
 CODEOWNERS = ["@echavet"]
 MULTI_CONF = False
@@ -189,6 +196,20 @@ InterferenceTwCouplingSensor = pool_station_ns.class_(
     "InterferenceTwCouplingSensor", binary_sensor.BinarySensor, cg.Component
 )
 
+# Lot A: runtime ADS gain / saturation overlay
+AdsGainSelect = pool_station_ns.class_(
+    "AdsGainSelect", select.Select, cg.Component
+)
+AdsSaturatedBinarySensor = pool_station_ns.class_(
+    "AdsSaturatedBinarySensor", binary_sensor.BinarySensor, cg.Component
+)
+AdsGainMismatchSensor = pool_station_ns.class_(
+    "AdsGainMismatchSensor", binary_sensor.BinarySensor, cg.Component
+)
+AdsResetYamlButton = pool_station_ns.class_(
+    "AdsResetYamlButton", button.Button, cg.Component
+)
+
 # Configuration keys
 CONF_POOL_STATION_ID = "pool_station_id"
 CONF_CALIBRATION_MODE = "calibration_mode"
@@ -320,6 +341,17 @@ CONF_COINCIDENT_JUMP_FLAG = "coincident_jump_flag"
 CONF_SHARED_NOISE_FLAG = "shared_noise_flag"
 CONF_TW_COUPLING_FLAG = "tw_coupling_flag"
 
+# Lot A: runtime ADS overlay (opt-in per channel)
+CONF_ADS = "ads"
+CONF_ADS_GAIN = "gain"
+CONF_SATURATION_ON = "saturation_on"
+CONF_SATURATION_OFF = "saturation_off"
+CONF_GAIN_SELECT = "gain_select"
+CONF_SATURATED = "saturated"
+CONF_FSR_PERCENT = "fsr_percent"
+CONF_GAIN_MISMATCH = "gain_mismatch"
+CONF_RESET_YAML_BUTTON = "reset_yaml_button"
+
 # Channel types enum (must match C++)
 CHANNEL_TYPE_PRESSURE = 0
 CHANNEL_TYPE_PH = 1
@@ -417,6 +449,89 @@ def calibration_schema():
         # DFRobot ORP specific
         cv.Optional(CONF_DFROBOT_MID, default=2500.0): cv.float_,
         cv.Optional(CONF_DFROBOT_OFFSET, default=0.0): cv.float_,
+    })
+
+
+def validate_ads_gain(value):
+    """Accept ESPHome PGA floats or strings (6.144 … 0.256)."""
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError as exc:
+            raise cv.Invalid(
+                f"Unknown ADS gain '{value}'. Valid: {list(GAIN_SELECT_OPTIONS)}"
+            ) from exc
+    value = cv.float_(value)
+    try:
+        gain_float_to_code(value)
+    except ValueError as exc:
+        raise cv.Invalid(str(exc)) from exc
+    return value
+
+
+def validate_channel_ads_overlay(config):
+    """ads: requires a typed ADS1115Sensor source — no silent static_cast."""
+    ads_conf = config.get(CONF_ADS)
+    if not ads_conf:
+        return config
+    sat_on = ads_conf.get(CONF_SATURATION_ON, 0.98)
+    sat_off = ads_conf.get(CONF_SATURATION_OFF, 0.95)
+    if sat_off >= sat_on:
+        raise cv.Invalid("ads.saturation_off must be < ads.saturation_on")
+    source = config.get(CONF_SOURCE_ID)
+    type_name = id_type_name(source)
+    ok = source_type_is_ads1115_sensor(type_name)
+    if not ok:
+        type_obj = getattr(source, "type", None)
+        inherits = getattr(type_obj, "inherits_from", None)
+        if callable(inherits):
+            try:
+                from esphome.components.ads1115.sensor import ADS1115Sensor
+                ok = bool(inherits(ADS1115Sensor))
+            except Exception:  # pragma: no cover - missing ads1115 component
+                ok = False
+    err = ads_overlay_source_error(True, type_name if not ok else "ADS1115Sensor")
+    if not ok and err:
+        raise cv.Invalid(err)
+    return config
+
+
+def ads_schema():
+    """Opt-in Lot A overlay: runtime PGA + saturation. No mux / continuous_mode."""
+    return cv.Schema({
+        cv.Optional(CONF_ADS_GAIN, default=4.096): validate_ads_gain,
+        cv.Optional(CONF_SATURATION_ON, default=0.98): cv.float_range(min=0.5, max=1.0),
+        cv.Optional(CONF_SATURATION_OFF, default=0.95): cv.float_range(min=0.5, max=1.0),
+        cv.Optional(CONF_HOLD_TIME, default="15s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_GAIN_SELECT): select.select_schema(
+            AdsGainSelect,
+            icon="mdi:sine-wave",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_SATURATED): binary_sensor.binary_sensor_schema(
+            AdsSaturatedBinarySensor,
+            icon="mdi:alert-decagram",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_FSR_PERCENT): sensor.sensor_schema(
+            unit_of_measurement="%",
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:percent",
+        ),
+        cv.Optional(CONF_GAIN_MISMATCH): binary_sensor.binary_sensor_schema(
+            AdsGainMismatchSensor,
+            icon="mdi:compare",
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_RESET_YAML_BUTTON): button.button_schema(
+            AdsResetYamlButton,
+            icon="mdi:restore",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
     })
 
 
@@ -859,7 +974,7 @@ def channel_schema(channel_type):
     if device_class is not None:
         schema_kwargs["device_class"] = device_class
     
-    return sensor.sensor_schema(
+    schema = sensor.sensor_schema(
         PoolStationChannelSensor,
         **schema_kwargs,
     ).extend({
@@ -910,7 +1025,10 @@ def channel_schema(channel_type):
         cv.Optional(CONF_GATE): gate_schema(),
         # Simple sample_when shorthand (alternative to full gate config)
         cv.Optional(CONF_SAMPLE_WHEN): cv.ensure_list(gate_condition_schema()),
+        # Lot A: runtime ADS gain / saturation (opt-in; source must be ads1115)
+        cv.Optional(CONF_ADS): ads_schema(),
     }).extend(cv.COMPONENT_SCHEMA)
+    return cv.All(schema, validate_channel_ads_overlay)
 
 
 # Calibration mode switch schema
@@ -1297,6 +1415,64 @@ async def setup_capturer_ui(config, parent_var, channel_var, channel_type, chann
         await binary_sensor.register_binary_sensor(invalid_var, invalid_conf)
 
 
+async def setup_ads_overlay(config, parent_var, channel_var, channel_type, component_id):
+    """Setup Lot A ADS gain overlay. No-op when ads: is omitted."""
+    ads_conf = config.get(CONF_ADS)
+    if ads_conf is None:
+        return
+
+    source_sensor = await cg.get_variable(config[CONF_SOURCE_ID])
+    cg.add(channel_var.set_ads1115_sensor(source_sensor))
+    cg.add(channel_var.set_ads_overlay_enabled(True))
+    cg.add(channel_var.set_ads_yaml_gain(gain_float_to_code(ads_conf[CONF_ADS_GAIN])))
+    cg.add(channel_var.set_saturation_on(ads_conf[CONF_SATURATION_ON]))
+    cg.add(channel_var.set_saturation_off(ads_conf[CONF_SATURATION_OFF]))
+    cg.add(channel_var.set_saturation_hold_ms(ads_conf[CONF_HOLD_TIME]))
+    cg.add(channel_var.set_runtime_preferences_key(
+        generate_runtime_preferences_key(component_id, channel_type)
+    ))
+
+    if CONF_GAIN_SELECT in ads_conf:
+        sel_conf = ads_conf[CONF_GAIN_SELECT]
+        sel_var = cg.new_Pvariable(sel_conf[CONF_ID])
+        cg.add(sel_var.set_parent(parent_var))
+        cg.add(sel_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_gain_select(sel_var))
+        await cg.register_component(sel_var, sel_conf)
+        await select.register_select(
+            sel_var, sel_conf, options=list(GAIN_SELECT_OPTIONS)
+        )
+
+    if CONF_SATURATED in ads_conf:
+        sat_conf = ads_conf[CONF_SATURATED]
+        sat_var = cg.new_Pvariable(sat_conf[CONF_ID])
+        cg.add(sat_var.set_parent(parent_var))
+        cg.add(sat_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_saturated_sensor(sat_var))
+        await cg.register_component(sat_var, sat_conf)
+        await binary_sensor.register_binary_sensor(sat_var, sat_conf)
+
+    if CONF_FSR_PERCENT in ads_conf:
+        fsr_var = await sensor.new_sensor(ads_conf[CONF_FSR_PERCENT])
+        cg.add(channel_var.set_fsr_percent_sensor(fsr_var))
+
+    if CONF_GAIN_MISMATCH in ads_conf:
+        mm_conf = ads_conf[CONF_GAIN_MISMATCH]
+        mm_var = cg.new_Pvariable(mm_conf[CONF_ID])
+        cg.add(mm_var.set_parent(parent_var))
+        cg.add(mm_var.set_channel_type(channel_type))
+        cg.add(channel_var.set_gain_mismatch_sensor(mm_var))
+        await cg.register_component(mm_var, mm_conf)
+        await binary_sensor.register_binary_sensor(mm_var, mm_conf)
+
+    if CONF_RESET_YAML_BUTTON in ads_conf:
+        btn_conf = ads_conf[CONF_RESET_YAML_BUTTON]
+        btn_var = cg.new_Pvariable(btn_conf[CONF_ID])
+        cg.add(btn_var.set_parent(parent_var))
+        cg.add(btn_var.set_channel_type(channel_type))
+        await button.register_button(btn_var, btn_conf)
+
+
 async def setup_diagnostics_ui(config, parent_var, channel_var, channel_type, channel_key):
     """Setup diagnostic sensors and flags for a channel (Lot 4)."""
     diag_conf = config.get(CONF_DIAGNOSTICS)
@@ -1678,6 +1854,11 @@ async def to_code(config):
                 cg.add(cal_inv_var.set_channel_type(channel_type))
                 cg.add(var.register_cal_invalid_sensor(cal_inv_var, channel_type))
             
+            # Setup Lot A ADS overlay (opt-in)
+            await setup_ads_overlay(
+                ch_conf, var, ch_var, channel_type, str(config[CONF_ID])
+            )
+
             # Setup Capturer UI
             await setup_capturer_ui(ch_conf, var, ch_var, channel_type, channel_key)
             

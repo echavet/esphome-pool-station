@@ -383,5 +383,91 @@ class DraftInvalidSensor : public binary_sensor::BinarySensor, public Component 
   uint32_t last_check_{0};
 };
 
+// ============================================================================
+// Lot A: Runtime ADS gain / saturation
+// ============================================================================
+
+/**
+ * Select entity for per-channel ADS1115 PGA.
+ * Options are the native ESPHome gain strings (6.144 … 0.256).
+ * Soft-locked while Calibration Mode is ON (write refused, state unchanged).
+ */
+class AdsGainSelect : public select::Select, public Component {
+ public:
+  AdsGainSelect() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+  void update_from_channel();
+
+ protected:
+  void control(const std::string &value) override;
+
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
+/**
+ * Binary sensor: ADC near current FSR (hysteresis + hold).
+ * device_class problem — not a substitute for Lot 4 out_of_range (chemistry).
+ */
+class AdsSaturatedBinarySensor : public binary_sensor::BinarySensor, public Component {
+ public:
+  AdsSaturatedBinarySensor() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
+/**
+ * Binary sensor: current gain shadow ≠ gain remembered at last successful Save.
+ * 0xFF (never saved since overlay) → OFF (no false positive).
+ */
+class AdsGainMismatchSensor : public binary_sensor::BinarySensor, public Component {
+ public:
+  AdsGainMismatchSensor() = default;
+
+  void setup() override;
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
+/**
+ * Restore YAML seed gain (and persist the sidecar). NVS otherwise wins OTA.
+ */
+class AdsResetYamlButton : public button::Button, public Component {
+ public:
+  AdsResetYamlButton() = default;
+
+  void setup() override {}
+  void dump_config() override;
+
+  void set_parent(PoolStationComponent *parent) { this->parent_ = parent; }
+  void set_channel_type(uint8_t type) { this->channel_type_ = type; }
+
+ protected:
+  void press_action() override;
+
+  PoolStationComponent *parent_{nullptr};
+  uint8_t channel_type_{0};
+};
+
 }  // namespace pool_station
 }  // namespace esphome

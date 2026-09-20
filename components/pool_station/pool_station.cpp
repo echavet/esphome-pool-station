@@ -369,6 +369,17 @@ void PoolStationChannelSensor::setup() {
   
   // Load calibration from preferences (if available)
   this->calibration_.load_from_preferences();
+
+  // Lot A: YAML seed then NVS overlay (NVS wins). Apply before subscribe so
+  // the first source poll usually sees the runtime gain. One YAML-gain sample
+  // is still possible if the ADS already updated during its own setup.
+  if (this->ads_overlay_enabled_) {
+    ads_runtime::init_unmanaged(&this->runtime_prefs_cache_);
+    this->gain_shadow_ = this->yaml_gain_;
+    this->apply_ads_gain_to_source_();
+    this->load_runtime_preferences();
+    this->publish_ads_ui_();
+  }
   
   // Initialize filter components (Lot 3)
   if (this->filter_config_.is_median_enabled()) {
@@ -426,12 +437,31 @@ void PoolStationChannelSensor::setup() {
 }
 
 void PoolStationChannelSensor::loop() {
+  if (this->ads_overlay_enabled_) {
+    this->expire_saturation_hold_(millis());
+  }
 }
 
 void PoolStationChannelSensor::dump_config() {
   LOG_SENSOR("", "Pool Station Channel", this);
   ESP_LOGCONFIG(TAG, "  Type: %s", this->get_channel_type_name());
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->configured_interval_);
+  if (this->ads_overlay_enabled_) {
+    ESP_LOGCONFIG(TAG, "  ADS overlay: ON (compose, not ownership)");
+    ESP_LOGCONFIG(TAG, "    gain shadow: %s (FSR=%.3f V, yaml seed=%s)",
+                  ads_runtime::gain_code_to_label(this->gain_shadow_), this->get_fsr_volts(),
+                  ads_runtime::gain_code_to_label(this->yaml_gain_));
+    ESP_LOGCONFIG(TAG, "    saturation: ON>=%.0f%% FSR, OFF<=%.0f%%, hold=%u ms",
+                  this->sat_on_ * 100.0f, this->sat_off_ * 100.0f, this->sat_hold_ms_);
+    if (this->gain_at_last_cal_save_ == ads_runtime::GAIN_UNMANAGED) {
+      ESP_LOGCONFIG(TAG, "    gain_at_last_cal_save: never");
+    } else {
+      ESP_LOGCONFIG(TAG, "    gain_at_last_cal_save: %s%s",
+                    ads_runtime::gain_code_to_label(this->gain_at_last_cal_save_),
+                    this->is_gain_mismatch() ? " (MISMATCH)" : "");
+    }
+    ESP_LOGCONFIG(TAG, "    changing gain does not rescale calibration X/Y (volts)");
+  }
   if (this->raw_sensor_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Raw sensor: configured");
   }
@@ -562,6 +592,205 @@ void PoolStationChannelSensor::set_draft_mode_enabled(bool enabled) {
     this->calibration_.enable_draft_mode();
   } else {
     this->calibration_.disable_draft_mode();
+  }
+}
+
+void PoolStationChannelSensor::set_ads1115_sensor(sensor::Sensor *sensor) {
+#ifdef USE_ADS1115
+  this->ads_ = static_cast<ads1115::ADS1115Sensor *>(sensor);
+  this->ads_overlay_enabled_ = (sensor != nullptr);
+#else
+  this->ads_overlay_enabled_ = false;
+  (void) sensor;
+#endif
+}
+
+void PoolStationChannelSensor::set_runtime_preferences_key(uint32_t key) {
+  this->runtime_prefs_key_ = key;
+}
+
+void PoolStationChannelSensor::ensure_runtime_prefs_obj_() {
+  if (this->runtime_prefs_obj_ready_ || this->runtime_prefs_key_ == 0) {
+    return;
+  }
+  this->runtime_prefs_ =
+      global_preferences->make_preference<ads_runtime::ChannelRuntimePrefsData>(
+          this->runtime_prefs_key_);
+  this->runtime_prefs_obj_ready_ = true;
+}
+
+void PoolStationChannelSensor::apply_ads_gain_to_source_() {
+#ifdef USE_ADS1115
+  if (this->ads_ != nullptr && ads_runtime::is_managed_gain(this->gain_shadow_)) {
+    this->ads_->set_gain(static_cast<ads1115::ADS1115Gain>(this->gain_shadow_));
+  }
+#endif
+}
+
+void PoolStationChannelSensor::apply_gain_runtime(uint8_t gain_code, bool persist) {
+  if (!ads_runtime::is_valid_gain_code(gain_code)) {
+    ESP_LOGW(TAG, "Channel %s: ignore invalid ADS gain code 0x%02X",
+             this->get_channel_type_name(), gain_code);
+    return;
+  }
+  const bool changed = (gain_code != this->gain_shadow_);
+  this->gain_shadow_ = gain_code;
+  this->apply_ads_gain_to_source_();
+  if (persist && changed) {
+    this->save_runtime_preferences();
+  }
+  this->publish_ads_ui_();
+  if (changed) {
+    ESP_LOGI(TAG, "Channel %s: ADS gain %s (FSR=%.3f V) — calibration volts unchanged",
+             this->get_channel_type_name(), ads_runtime::gain_code_to_label(gain_code),
+             this->get_fsr_volts());
+  }
+}
+
+void PoolStationChannelSensor::reset_ads_to_yaml() {
+  ESP_LOGI(TAG, "Channel %s: reset ADS gain to YAML seed %s",
+           this->get_channel_type_name(), ads_runtime::gain_code_to_label(this->yaml_gain_));
+  this->apply_gain_runtime(this->yaml_gain_, true);
+}
+
+void PoolStationChannelSensor::load_runtime_preferences() {
+  if (this->runtime_prefs_key_ == 0) {
+    return;
+  }
+  this->ensure_runtime_prefs_obj_();
+  ads_runtime::ChannelRuntimePrefsData data;
+  ads_runtime::init_unmanaged(&data);
+  if (!this->runtime_prefs_.load(&data)) {
+    ESP_LOGD(TAG, "Channel %s: no runtime ADS prefs, using YAML seed",
+             this->get_channel_type_name());
+    ads_runtime::init_unmanaged(&this->runtime_prefs_cache_);
+    this->runtime_prefs_loaded_ = false;
+    return;
+  }
+  if (data.magic != ads_runtime::CHANNEL_RUNTIME_PREFS_MAGIC ||
+      data.version != ads_runtime::CHANNEL_RUNTIME_PREFS_VERSION) {
+    ESP_LOGD(TAG, "Channel %s: ignore runtime prefs magic=0x%08X ver=%u",
+             this->get_channel_type_name(), data.magic, data.version);
+    ads_runtime::init_unmanaged(&this->runtime_prefs_cache_);
+    this->runtime_prefs_loaded_ = false;
+    return;
+  }
+  this->runtime_prefs_cache_ = data;
+  this->runtime_prefs_loaded_ = true;
+  this->gain_at_last_cal_save_ = data.gain_at_last_cal_save;
+  if ((data.flags & ads_runtime::RT_FLAG_HAS_GAIN) && ads_runtime::is_managed_gain(data.ads_gain)) {
+    this->apply_gain_runtime(data.ads_gain, false);
+    ESP_LOGI(TAG, "Channel %s: loaded runtime ADS gain %s from NVS",
+             this->get_channel_type_name(), ads_runtime::gain_code_to_label(data.ads_gain));
+  }
+}
+
+void PoolStationChannelSensor::save_runtime_preferences() {
+  if (this->runtime_prefs_key_ == 0) {
+    return;
+  }
+  this->ensure_runtime_prefs_obj_();
+  ads_runtime::ChannelRuntimePrefsData data = this->runtime_prefs_cache_;
+  if (data.magic != ads_runtime::CHANNEL_RUNTIME_PREFS_MAGIC) {
+    ads_runtime::init_unmanaged(&data);
+  }
+  data.magic = ads_runtime::CHANNEL_RUNTIME_PREFS_MAGIC;
+  data.version = ads_runtime::CHANNEL_RUNTIME_PREFS_VERSION;
+  data.ads_gain = this->gain_shadow_;
+  data.flags = static_cast<uint8_t>(data.flags | ads_runtime::RT_FLAG_HAS_GAIN);
+  data.gain_at_last_cal_save = this->gain_at_last_cal_save_;
+  this->runtime_prefs_.save(&data);
+  this->runtime_prefs_cache_ = data;
+  this->runtime_prefs_loaded_ = true;
+}
+
+void PoolStationChannelSensor::remember_gain_at_cal_save() {
+  if (!this->ads_overlay_enabled_) {
+    return;
+  }
+  this->gain_at_last_cal_save_ = this->gain_shadow_;
+  this->save_runtime_preferences();
+  this->publish_gain_mismatch_();
+  ESP_LOGI(TAG, "Channel %s: remembered ADS gain %s at calibration Save",
+           this->get_channel_type_name(), ads_runtime::gain_code_to_label(this->gain_shadow_));
+}
+
+float PoolStationChannelSensor::get_fsr_volts() const {
+  return ads_runtime::fsr_volts_for_gain(this->gain_shadow_);
+}
+
+float PoolStationChannelSensor::get_fsr_percent(float raw_v) const {
+  return ads_runtime::fsr_percent(raw_v, this->get_fsr_volts());
+}
+
+bool PoolStationChannelSensor::is_adc_saturated(float raw_v) const {
+  if (!this->ads_overlay_enabled_) {
+    return false;
+  }
+  return ads_runtime::above_sat_on(raw_v, this->get_fsr_volts(), this->sat_on_);
+}
+
+bool PoolStationChannelSensor::refuse_calibration_save_if_saturated() const {
+  return this->is_adc_saturated();
+}
+
+bool PoolStationChannelSensor::is_gain_mismatch() const {
+  if (!this->ads_overlay_enabled_) {
+    return false;
+  }
+  if (this->gain_at_last_cal_save_ == ads_runtime::GAIN_UNMANAGED) {
+    return false;
+  }
+  return this->gain_shadow_ != this->gain_at_last_cal_save_;
+}
+
+void PoolStationChannelSensor::update_saturation_(uint32_t now) {
+  if (!this->ads_overlay_enabled_) {
+    return;
+  }
+  const float fsr = this->get_fsr_volts();
+  const float raw = this->last_raw_value_;
+  this->sat_raw_latched_ = ads_runtime::saturation_hysteresis(
+      std::fabs(raw), fsr, this->sat_on_, this->sat_off_, this->sat_raw_latched_);
+  if (this->sat_raw_latched_) {
+    this->sat_last_on_ms_ = now;
+    this->sat_published_ = true;
+  } else {
+    this->expire_saturation_hold_(now);
+  }
+  if (this->saturated_sensor_ != nullptr) {
+    this->saturated_sensor_->publish_state(this->sat_published_);
+  }
+  if (this->fsr_percent_sensor_ != nullptr) {
+    this->fsr_percent_sensor_->publish_state(this->get_fsr_percent(raw));
+  }
+}
+
+void PoolStationChannelSensor::expire_saturation_hold_(uint32_t now) {
+  if (!this->sat_published_ || this->sat_raw_latched_) {
+    return;
+  }
+  if (now - this->sat_last_on_ms_ >= this->sat_hold_ms_) {
+    this->sat_published_ = false;
+    if (this->saturated_sensor_ != nullptr) {
+      this->saturated_sensor_->publish_state(false);
+    }
+  }
+}
+
+void PoolStationChannelSensor::publish_gain_mismatch_() {
+  if (this->gain_mismatch_sensor_ != nullptr) {
+    this->gain_mismatch_sensor_->publish_state(this->is_gain_mismatch());
+  }
+}
+
+void PoolStationChannelSensor::publish_ads_ui_() {
+  if (this->gain_select_ != nullptr) {
+    this->gain_select_->update_from_channel();
+  }
+  this->publish_gain_mismatch_();
+  if (this->ads_overlay_enabled_) {
+    this->update_saturation_(millis());
   }
 }
 
@@ -739,8 +968,11 @@ void PoolStationChannelSensor::on_source_value_(float value) {
   // (Lot 5: Temperature compensation inserted after calibration)
   // =========================================================================
   
-  // Step 1: Store original raw value
+  // Step 1: Store original raw value (Lot A sat uses this, pre-median)
   this->last_raw_value_ = value;
+  if (this->ads_overlay_enabled_) {
+    this->update_saturation_(now);
+  }
   
   // Step 2: Apply median window filter (if enabled)
   // In calibration mode, bypass median for ~1s raw response

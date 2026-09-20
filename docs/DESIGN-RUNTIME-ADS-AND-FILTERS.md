@@ -1,6 +1,6 @@
 # Design — ADS1115 / filtres dynamiques au runtime
 
-> **Statut** : design only (pas d’implémentation firmware dans ce PR).  
+> **Statut** : Lot A **implémenté** en v0.9.0 (usage : [MIGRATION](MIGRATION.md#runtime-ads-gain-lot-a-v090)). Lot B plus tard. Lot C NO-GO.  
 > **Décideur** : Eric Chavet.  
 > **Cible** : ESPHome **2026.x** (`ads1115` lu sur `dev` / docs 2026, API identique à 2026.8).  
 > **Repo** : `echavet/esphome-pool-station` @ Lot 8 / v0.8.1.  

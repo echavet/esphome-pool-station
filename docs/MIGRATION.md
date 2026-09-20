@@ -12,6 +12,7 @@ This guide helps migrate from older pool monitoring configurations to `pool_stat
 - [Capturer draft / Save review fixes (v0.7.18)](#capturer-draft-save-review-fixes-v0718)
 - [Restore Capturer draft entities (v0.8.1)](#restore-capturer-draft-entities-v081)
 - [Interference detection (v0.8.0)](#interference-detection-v080)
+- [Runtime ADS gain — Lot A (v0.9.0)](#runtime-ads-gain-lot-a-v090)
 - [SENSOR-IDENTITY Checklist Before OTA](#sensor-identity-checklist-before-ota)
 
 ---
@@ -368,6 +369,64 @@ pool_station:
 
 Turn **Calibration Mode** ON while using buffers so Capturer tours do not
 pollute σ windows.
+
+---
+
+## Runtime ADS gain — Lot A (v0.9.0)
+
+Opt-in. YAML without `ads:` is unchanged (no new entities).
+
+The compose model is unchanged: `source_id` still points at a native
+`platform: ads1115` sensor. Lot A adds a typed overlay so you can change
+PGA from Home Assistant without OTA.
+
+```yaml
+# Source YAML gain is the seed (and possibly the first poll).
+sensor:
+  - platform: ads1115
+    ads1115_id: ads
+    multiplexer: 'A2_GND'
+    gain: 6.144
+    id: ads_ph
+    internal: true
+    update_interval: 1s
+
+pool_station:
+  channels:
+    ph:
+      source_id: ads_ph
+      ads:
+        gain: 6.144                 # seed; NVS wins after first HA apply
+        saturation_on: 0.98
+        saturation_off: 0.95
+        hold_time: 15s
+        gain_select:
+          name: "pH Gain ADC"       # keep name: for stable HA entity IDs
+        saturated:
+          name: "pH ADC saturé"
+        fsr_percent:
+          name: "pH ADC % FSR"
+        gain_mismatch:
+          name: "pH Gain ≠ étalonnage"
+        reset_yaml_button:
+          name: "pH Gain YAML"
+```
+
+Rules:
+
+- **Calibration stays in volts.** Changing 4.096 → 6.144 does not rescale X/Y.
+- **NVS sidecar** `ps-md5-rt-v1` stores the HA gain. Calibration key
+  `ps-md5-v1` / magic `0xCA110005` is **not** bumped — no forced recapture.
+- After a HA gain change, **NVS wins** over a later YAML `gain:` edit.
+  Use `reset_yaml_button` to reload the YAML seed.
+- **Calibration Mode ON** soft-locks the gain select (write refused).
+- **Save is refused** if `|raw| ≥ 98 %` of the current FSR (do not persist a rail).
+- `saturated` is an ADC health flag, not Lot 4 `out_of_range` (chemistry units).
+- Leave `continuous_mode: false` on a shared ADS. Do not HA-tune the mux.
+
+Product note: if « ADC saturé » is ON, Capturer X values are **ceilings**,
+not measurements. Widen the PGA (usually `6.144` for a 0–5 V isolator) or
+fix the wiring, **then** recapture.
 
 ---
 
