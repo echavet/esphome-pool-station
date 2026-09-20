@@ -479,15 +479,23 @@ Rules:
   blob with unmanaged filter fields (`0xFF` / `NAN` / interval `0`) does
   not override YAML filters. Calibration magic `0xCA110005` is **not**
   bumped — no forced recapture.
-- After a HA change, **NVS wins** over a later YAML `filters:` edit.
-  Use `reset_yaml_button` to reload the YAML seeds.
-- `filter_samples` resize **clears** the median window; raw is published
-  until the window is full again (same as boot).
-- `max_jump: 0` disables the jump guard. Lot 8 coincident-jump still
-  sees **pre-guard** compensated samples.
-- `update_interval_number` is the channel throttle only. Calibration
-  Mode still forces ~1 s. The ADS source poll is **not** changed (MVP).
-- `value_min` / `value_max` stay **clamp**, not j5 reject.
+- NVS wins **per field after that field's first HA apply** (or
+  `reset_yaml`). Calibration Save / gain change write only gain fields
+  and leave unmanaged filter/interval sentinels so YAML seeds stay live.
+- After a HA filter change, **NVS wins** over a later YAML `filters:`
+  edit. Use `reset_yaml_button` to reload the YAML seeds.
+- `filter_samples` resize **clears** the median window only when the
+  size actually changes; raw is published until the window is full
+  again (same as boot).
+- `max_jump: 0` disables the jump guard. JumpGuard resets only when
+  jump/streak change. Lot 8 coincident-jump still sees **pre-guard**
+  compensated samples.
+- `update_interval_number` is the channel throttle only (HA range
+  1–3600 s). Calibration Mode still forces ~1 s. A YAML interval
+  shorter than 1 s is restored by `reset_yaml`. The ADS source poll is
+  **not** changed (MVP).
+- `value_min` / `value_max` stay **clamp**, not j5 reject. Runtime
+  numbers require the YAML seed. Inverted min>max is refused.
 - Filters are outside Capturer: changing a number never calls
   `commit_draft` / `discard_draft`.
 

@@ -385,7 +385,9 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void apply_gain_runtime(uint8_t gain_code, bool persist = true);
   void reset_ads_to_yaml();
   void load_runtime_preferences();
-  void save_runtime_preferences();
+  // stamp_* : persist current filter/interval into the sidecar. Gain Save /
+  // remember_gain must leave unmanaged Lot B sentinels intact (design §4.2).
+  void save_runtime_preferences(bool stamp_filters = false, bool stamp_interval = false);
   void remember_gain_at_cal_save();
 
   // Lot B: filter / interval overlay (opt-in). Outside Capturer draft/Save.

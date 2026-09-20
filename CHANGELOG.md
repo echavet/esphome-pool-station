@@ -27,6 +27,21 @@ Per channel, opt-in:
 Without `filters.runtime` / `update_interval_number`: existing YAML is
 unchanged (zero new entities). `filters:` seeds still apply as Lot 3.
 
+### Fixed — Lot B review (same PR, no version bump)
+
+- Save cal / `apply_gain_runtime` no longer stamp unmanaged filter or
+  interval fields (design §4.2: Save does not write filters)
+- Sidecar `alignas(4)` so Lot B float fields cannot fault on ESP32-C3/C6
+  (32-byte Lot A layout unchanged)
+- `HAS_VMIN` / `HAS_VMAX` require a finite value (NAN does not wipe YAML)
+- Inverted `value_min` > `value_max` apply is refused
+- `reset_yaml` restores a YAML `update_interval` below 1 s (HA still 1–3600)
+- Median `set_size` / JumpGuard reset skipped when the size or jump is unchanged
+- `SlidingWindow::is_full()` is false when size is 0
+- `filters.runtime.value_min/max` require the YAML clamp seed
+- Non-finite HA number values are ignored
+- Lot B numbers default to `mode: box`
+
 See [MIGRATION.md](docs/MIGRATION.md#runtime-filters-lot-b-v0100) and
 [DESIGN-RUNTIME-ADS-AND-FILTERS.md](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md).
 

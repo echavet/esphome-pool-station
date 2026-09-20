@@ -364,6 +364,194 @@ class CodegenContractTest(unittest.TestCase):
         self.assertAlmostEqual(ads.FILTER_NUMBER_SPECS["orp"]["jump_step"], 1.0)
         self.assertAlmostEqual(ads.FILTER_NUMBER_SPECS["pressure"]["jump_step"], 0.01)
 
+    def test_save_cal_does_not_stamp_unmanaged_filters(self):
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        save = _fn(source, "void PoolStationChannelSensor::save_runtime_preferences")
+        self.assertIn("stamp_filters", save)
+        self.assertIn("stamp_interval", save)
+        self.assertIn("filters_persist_ && stamp_filters", save)
+        self.assertIn("interval_persist_ && stamp_interval", save)
+        remember = _fn(source, "void PoolStationChannelSensor::remember_gain_at_cal_save")
+        self.assertIn("save_runtime_preferences()", remember)
+        self.assertNotIn("save_runtime_preferences(true", remember)
+        apply_gain = _fn(source, "void PoolStationChannelSensor::apply_gain_runtime")
+        self.assertIn("save_runtime_preferences()", apply_gain)
+        persist_f = _fn(source, "void PoolStationChannelSensor::persist_filters_if_")
+        persist_i = _fn(source, "void PoolStationChannelSensor::persist_interval_if_")
+        self.assertIn("save_runtime_preferences(true, false)", persist_f)
+        self.assertIn("save_runtime_preferences(false, true)", persist_i)
+        reset = _fn(source, "void PoolStationChannelSensor::reset_filters_to_yaml")
+        self.assertIn("save_runtime_preferences(this->filters_persist_, this->interval_persist_)", reset)
+
+    def test_median_skip_same_size_and_jump_skip_same(self):
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        median = _fn(source, "void PoolStationChannelSensor::sync_median_window_")
+        self.assertIn("get_size() == want", median)
+        jump = _fn(source, "void PoolStationChannelSensor::sync_jump_guard_")
+        self.assertIn("unchanged", jump)
+        self.assertIn("reset && !unchanged", jump)
+        setup = _fn(source, "void PoolStationChannelSensor::setup")
+        self.assertIn("sync_median_window_()", setup)
+        self.assertIn("sync_jump_guard_(false)", setup)
+
+    def test_interval_yaml_seed_not_forced_to_1s(self):
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        apply_iv = _fn(source, "void PoolStationChannelSensor::apply_update_interval_runtime")
+        self.assertIn("sanitize_update_interval_ms", apply_iv)
+        self.assertIn("sanitize_update_interval_ms(ms, persist)", apply_iv)
+
+    def test_has_vmin_requires_finite(self):
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        nvs = _fn(source, "void PoolStationChannelSensor::apply_nvs_filter_fields_")
+        self.assertIn("is_managed_float(data.value_min)", nvs)
+        self.assertIn("is_managed_float(data.value_max)", nvs)
+
+    def test_inverted_clamp_refused(self):
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        vmin = _fn(source, "void PoolStationChannelSensor::apply_value_min_runtime")
+        vmax = _fn(source, "void PoolStationChannelSensor::apply_value_max_runtime")
+        self.assertIn("clamp_bounds_valid", vmin)
+        self.assertIn("clamp_bounds_valid", vmax)
+        self.assertIn("clamp apply refused", vmin)
+        self.assertIn("isfinite", vmin)
+
+    def test_ha_number_rejects_non_finite(self):
+        with open(UI_CPP, encoding="utf-8") as handle:
+            ui = handle.read()
+        control = _fn(ui, "void FilterRuntimeNumber::control")
+        self.assertIn("isfinite(value)", control)
+        self.assertIn("update_from_channel()", control)
+
+    def test_cpp_is_full_false_when_size_zero(self):
+        header = os.path.join(ROOT, "components", "pool_station", "channel_filter.h")
+        with open(header, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("size_ > 0 && this->count_ >= this->size_", source)
+
+    def test_sidecar_alignas_and_cal_golden(self):
+        with open(ADS_H, encoding="utf-8") as handle:
+            header = handle.read()
+        self.assertIn("alignas(4)", header)
+        self.assertIn("alignof(ChannelRuntimePrefsData) >= 4", header)
+        self.assertNotIn("no production NVS yet", header)
+        self.assertEqual(ads.CALIBRATION_PREFS_MAGIC, 0xCA110005)
+        import hashlib
+        golden = int.from_bytes(hashlib.md5(b"ps-md5-v1:pool:0").digest()[:4], "big")
+        self.assertEqual(golden, 0x867CA26C)
+
+    def test_runtime_value_minmax_require_yaml_seed(self):
+        with open(INIT_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("validate_filter_runtime_seeds", source)
+        self.assertIn("validate_filters_config", source)
+        self.assertIn('default="BOX"', source)
+
+
+class StampAndSentinelTest(unittest.TestCase):
+    def test_gain_save_keeps_unmanaged_filters(self):
+        cache = ads.unpack_runtime_prefs(ads.pack_runtime_prefs({
+            "ads_gain": ads.GAIN_4P096,
+            "flags": ads.RT_FLAG_HAS_GAIN,
+        }))
+        live = {
+            "ads_gain": ads.GAIN_6P144,
+            "gain_at_last_cal_save": ads.GAIN_6P144,
+            "filter_samples": 5,
+            "max_jump": 0.5,
+            "max_jump_streak": 3,
+            "value_min": 0.0,
+            "value_max": 14.0,
+            "update_interval_ms": 60000,
+        }
+        stamped = ads.stamp_runtime_prefs(
+            cache, live, stamp_filters=False, stamp_interval=False, ads_overlay=True
+        )
+        self.assertEqual(stamped["ads_gain"], ads.GAIN_6P144)
+        self.assertEqual(stamped["filter_samples"], ads.GAIN_UNMANAGED)
+        self.assertTrue(math.isnan(stamped["max_jump"]))
+        self.assertEqual(stamped["update_interval_ms"], 0)
+        self.assertFalse(stamped["flags"] & ads.RT_FLAG_HAS_VMIN)
+
+    def test_filter_apply_stamps_only_filters(self):
+        cache = ads.unpack_runtime_prefs(ads.pack_runtime_prefs({
+            "ads_gain": ads.GAIN_4P096,
+            "flags": ads.RT_FLAG_HAS_GAIN,
+        }))
+        live = {
+            "filter_samples": 9,
+            "max_jump": 0.2,
+            "max_jump_streak": 4,
+            "value_min": 1.0,
+            "value_max": 12.0,
+            "update_interval_ms": 30000,
+        }
+        stamped = ads.stamp_runtime_prefs(
+            cache, live, stamp_filters=True, stamp_interval=False, ads_overlay=False
+        )
+        self.assertEqual(stamped["ads_gain"], ads.GAIN_4P096)
+        self.assertEqual(stamped["filter_samples"], 9)
+        self.assertEqual(stamped["update_interval_ms"], 0)
+        self.assertTrue(stamped["flags"] & ads.RT_FLAG_HAS_VMIN)
+
+    def test_has_vmin_nan_keeps_yaml(self):
+        nvs = {
+            "flags": ads.RT_FLAG_HAS_VMIN | ads.RT_FLAG_HAS_VMAX,
+            "value_min": math.nan,
+            "value_max": math.nan,
+        }
+        merged = ads.merge_nvs_filters(YAML_PH, nvs, persist=True)
+        self.assertEqual(merged["value_min"], 0.0)
+        self.assertEqual(merged["value_max"], 14.0)
+
+    def test_persist_interval_only_does_not_merge_filters(self):
+        nvs = {
+            "filter_samples": 1,
+            "max_jump": 0.1,
+            "max_jump_streak": 2,
+            "update_interval_ms": 15000,
+        }
+        merged = ads.merge_nvs_filters(
+            YAML_PH, nvs, persist_filters=False, persist_interval=True
+        )
+        self.assertEqual(merged["filter_samples"], 5)
+        self.assertEqual(merged["update_interval_ms"], 15000)
+
+    def test_yaml_interval_below_1s_kept_on_restore(self):
+        self.assertEqual(ads.sanitize_update_interval_ms(500, ha_range=False), 500)
+        self.assertEqual(ads.sanitize_update_interval_ms(500, ha_range=True), 1000)
+        self.assertEqual(ads.sanitize_update_interval_ms(4000000, ha_range=False), 3600000)
+
+    def test_inverted_bounds_rejected(self):
+        self.assertFalse(ads.clamp_bounds_valid(14.0, 0.0))
+        self.assertTrue(ads.clamp_bounds_valid(0.0, 14.0))
+        self.assertTrue(ads.clamp_bounds_valid(math.nan, 14.0))
+        self.assertTrue(ads.clamp_bounds_valid(0.0, math.nan))
+
+    def test_runtime_seed_validator(self):
+        self.assertIsNone(ads.validate_filter_runtime_seeds({
+            "value_min": 0.0,
+            "value_max": 14.0,
+            "runtime": {"value_min": {"name": "min"}, "value_max": {"name": "max"}},
+        }))
+        self.assertIn("requires filters.value_min", ads.validate_filter_runtime_seeds({
+            "runtime": {"value_min": {"name": "min"}},
+        }))
+        self.assertIn("must be <=", ads.validate_filter_runtime_seeds({
+            "value_min": 14.0,
+            "value_max": 0.0,
+        }))
+
+    def test_sliding_window_empty_size_not_full(self):
+        window = ads.SlidingWindow()
+        self.assertFalse(window.is_full())
+        window.set_size(0)
+        self.assertFalse(window.is_full())
+
 
 if __name__ == "__main__":
     raise SystemExit(unittest.main())

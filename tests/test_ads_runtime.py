@@ -291,6 +291,8 @@ class AdsCodegenContractTest(unittest.TestCase):
         with open(ADS_H, encoding="utf-8") as handle:
             header = handle.read()
         self.assertIn("pad_align_[2]", header)
+        self.assertIn("alignas(4)", header)
+        self.assertIn("alignof(ChannelRuntimePrefsData) >= 4", header)
         self.assertIn("sizeof(ChannelRuntimePrefsData) == 32", header)
         self.assertIn("offsetof(ChannelRuntimePrefsData, max_jump) == 12", header)
         self.assertIn("ADS1115_GAIN_6P144", header)

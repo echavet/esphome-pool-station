@@ -1,4 +1,5 @@
 #include "calibration_ui.h"
+#include <cmath>
 
 namespace esphome {
 namespace pool_station {
@@ -1011,6 +1012,12 @@ void FilterRuntimeNumber::control(float value) {
   if (channel == nullptr) {
     ESP_LOGW(TAG, "Channel %d not found for filter runtime number kind %u",
              this->channel_type_, this->kind_);
+    return;
+  }
+  if (!std::isfinite(value)) {
+    ESP_LOGW(TAG, "Ignore non-finite filter runtime value for channel %d kind %u",
+             this->channel_type_, this->kind_);
+    this->update_from_channel();
     return;
   }
   // Not locked in Calibration Mode (median/jump already bypass). Do not dirty draft.

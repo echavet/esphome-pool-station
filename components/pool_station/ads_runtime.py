@@ -1,8 +1,9 @@
-"""Lot A ADS overlay helpers — no ESPHome imports.
+"""Lot A/B ADS overlay + filter runtime helpers — no ESPHome imports.
 
-Mirrors ads_runtime.h (FSR table, hysteresis, PGA labels) so unit tests
-can lock the contract without compiling firmware. Also validates that
-``ads:`` is only used with a native ADS1115Sensor source.
+Mirrors ads_runtime.h (FSR table, hysteresis, PGA labels, filter clamps,
+sidecar stamp) so unit tests can lock the contract without compiling
+firmware. Also validates that ``ads:`` is only used with a native
+ADS1115Sensor source.
 """
 
 from __future__ import annotations
@@ -253,6 +254,51 @@ def is_managed_interval_ms(ms):
     return ms is not None and int(ms) != 0
 
 
+def clamp_bounds_valid(vmin, vmax):
+    """NAN / missing bounds are unbounded; inverted finite min>max is invalid."""
+    if vmin is None or vmax is None:
+        return True
+    try:
+        if math.isnan(vmin) or math.isnan(vmax):
+            return True
+    except TypeError:
+        return True
+    return float(vmin) <= float(vmax)
+
+
+def sanitize_update_interval_ms(ms, ha_range=True):
+    """HA apply uses 1–3600 s. YAML / NVS restore may keep a shorter seed."""
+    ms = int(ms)
+    if ha_range:
+        return clamp_update_interval_ms(ms)
+    if ms > UPDATE_INTERVAL_MS_MAX:
+        return UPDATE_INTERVAL_MS_MAX
+    return ms
+
+
+def validate_filter_runtime_seeds(filters_conf):
+    """Return an error string or None. runtime value_min/max need YAML seeds."""
+    if not filters_conf:
+        return None
+    if "value_min" in filters_conf and "value_max" in filters_conf:
+        if not clamp_bounds_valid(filters_conf.get("value_min"), filters_conf.get("value_max")):
+            return "filters.value_min must be <= filters.value_max (clamp bounds)"
+    rt = filters_conf.get("runtime")
+    if not rt:
+        return None
+    if "value_min" in rt and "value_min" not in filters_conf:
+        return (
+            "filters.runtime.value_min requires filters.value_min YAML seed "
+            "(omit both to leave clamp off; NAN cannot be a HA number)"
+        )
+    if "value_max" in rt and "value_max" not in filters_conf:
+        return (
+            "filters.runtime.value_max requires filters.value_max YAML seed "
+            "(omit both to leave clamp off; NAN cannot be a HA number)"
+        )
+    return None
+
+
 def clamp_filter_samples(n):
     n = int(n)
     if n < 0:
@@ -287,28 +333,74 @@ def clamp_update_interval_ms(ms):
     return ms
 
 
-def merge_nvs_filters(yaml_filters, nvs, persist=True):
+def merge_nvs_filters(yaml_filters, nvs, persist=True, persist_filters=None, persist_interval=None):
     """YAML seeds; NVS wins per managed field when persist is on.
 
     Unmanaged sentinels (0xFF / NAN / interval 0) keep the YAML seed so a
-    Lot A-only sidecar does not wipe Lot 3 filter defaults.
+    Lot A-only sidecar does not wipe Lot 3 filter defaults. HAS_VMIN/HAS_VMAX
+    without a finite value are treated as unmanaged (do not disable YAML clamp).
     """
+    if persist_filters is None:
+        persist_filters = persist
+    if persist_interval is None:
+        persist_interval = persist
     out = dict(yaml_filters)
-    if not persist or not nvs:
+    if not nvs:
         return out
-    if is_managed_u8(nvs.get("filter_samples")):
-        out["filter_samples"] = clamp_filter_samples(nvs["filter_samples"])
-    if is_managed_float(nvs.get("max_jump")):
-        out["max_jump"] = clamp_max_jump(nvs["max_jump"])
-    if is_managed_u8(nvs.get("max_jump_streak")):
-        out["max_jump_streak"] = clamp_max_jump_streak(nvs["max_jump_streak"])
-    flags = int(nvs.get("flags", 0))
-    if flags & RT_FLAG_HAS_VMIN:
-        out["value_min"] = nvs.get("value_min")
-    if flags & RT_FLAG_HAS_VMAX:
-        out["value_max"] = nvs.get("value_max")
-    if is_managed_interval_ms(nvs.get("update_interval_ms")):
-        out["update_interval_ms"] = clamp_update_interval_ms(nvs["update_interval_ms"])
+    if persist_filters:
+        if is_managed_u8(nvs.get("filter_samples")):
+            out["filter_samples"] = clamp_filter_samples(nvs["filter_samples"])
+        if is_managed_float(nvs.get("max_jump")):
+            out["max_jump"] = clamp_max_jump(nvs["max_jump"])
+        if is_managed_u8(nvs.get("max_jump_streak")):
+            out["max_jump_streak"] = clamp_max_jump_streak(nvs["max_jump_streak"])
+        flags = int(nvs.get("flags", 0))
+        if (flags & RT_FLAG_HAS_VMIN) and is_managed_float(nvs.get("value_min")):
+            out["value_min"] = nvs.get("value_min")
+        if (flags & RT_FLAG_HAS_VMAX) and is_managed_float(nvs.get("value_max")):
+            out["value_max"] = nvs.get("value_max")
+    if persist_interval and is_managed_interval_ms(nvs.get("update_interval_ms")):
+        out["update_interval_ms"] = sanitize_update_interval_ms(
+            nvs["update_interval_ms"], ha_range=False
+        )
+    return out
+
+
+def stamp_runtime_prefs(cache, live, stamp_filters=False, stamp_interval=False, ads_overlay=False):
+    """Mirror save_runtime_preferences: start from cache, stamp only requested fields.
+
+    Gain Save / remember_gain pass stamp_filters=False so unmanaged Lot B
+    sentinels stay unmanaged (design §4.2: Save cal does not write filters).
+    """
+    out = dict(cache)
+    out["magic"] = RUNTIME_PREFS_MAGIC
+    out["version"] = 1
+    flags = int(out.get("flags", 0))
+    if ads_overlay:
+        out["ads_gain"] = live.get("ads_gain", out.get("ads_gain", GAIN_UNMANAGED))
+        flags |= RT_FLAG_HAS_GAIN
+        out["gain_at_last_cal_save"] = live.get(
+            "gain_at_last_cal_save", out.get("gain_at_last_cal_save", GAIN_UNMANAGED)
+        )
+    if stamp_filters:
+        out["filter_samples"] = clamp_filter_samples(live["filter_samples"])
+        out["max_jump_streak"] = clamp_max_jump_streak(live["max_jump_streak"])
+        out["max_jump"] = clamp_max_jump(live["max_jump"])
+        if is_managed_float(live.get("value_min")):
+            flags |= RT_FLAG_HAS_VMIN
+            out["value_min"] = live["value_min"]
+        else:
+            flags &= ~RT_FLAG_HAS_VMIN
+            out["value_min"] = math.nan
+        if is_managed_float(live.get("value_max")):
+            flags |= RT_FLAG_HAS_VMAX
+            out["value_max"] = live["value_max"]
+        else:
+            flags &= ~RT_FLAG_HAS_VMAX
+            out["value_max"] = math.nan
+    if stamp_interval:
+        out["update_interval_ms"] = live["update_interval_ms"]
+    out["flags"] = flags
     return out
 
 

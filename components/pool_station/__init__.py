@@ -14,6 +14,7 @@ from esphome.const import (
     CONF_UPDATE_INTERVAL,
     CONF_ICON,
     CONF_ENTITY_CATEGORY,
+    CONF_MODE,
     ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_VOLT,
@@ -43,6 +44,7 @@ from .ads_runtime import (
     gain_float_to_code,
     id_type_name,
     source_id_is_ads1115_sensor,
+    validate_filter_runtime_seeds,
 )
 
 CODEOWNERS = ["@echavet"]
@@ -556,7 +558,17 @@ def filter_runtime_number_schema(icon, unit=None):
     }
     if unit is not None:
         kwargs["unit_of_measurement"] = unit
-    return number.number_schema(FilterRuntimeNumber, **kwargs)
+    # Design §4.1: clamp numbers use mode: box (same as other config numbers).
+    return number.number_schema(FilterRuntimeNumber, **kwargs).extend({
+        cv.Optional(CONF_MODE, default="BOX"): cv.one_of("BOX", "SLIDER", upper=True),
+    })
+
+
+def validate_filters_config(config):
+    err = validate_filter_runtime_seeds(config)
+    if err:
+        raise cv.Invalid(err)
+    return config
 
 
 def filters_runtime_schema():
@@ -592,14 +604,14 @@ def filters_schema():
     sensor_register_compat.sensor_register_config(). `runtime` stays inside
     this dict so it is stripped too (no collision with build_filters()).
     """
-    return cv.Schema({
+    return cv.All(cv.Schema({
         cv.Optional(CONF_FILTER_SAMPLES, default=0): cv.int_range(min=0, max=20),
         cv.Optional(CONF_MAX_JUMP, default=0.0): cv.float_,
         cv.Optional(CONF_MAX_JUMP_STREAK, default=3): cv.int_range(min=1, max=10),
         cv.Optional(CONF_VALUE_MIN): cv.float_,
         cv.Optional(CONF_VALUE_MAX): cv.float_,
         cv.Optional(CONF_FILTER_RUNTIME): filters_runtime_schema(),
-    })
+    }), validate_filters_config)
 
 
 def diagnostics_schema(channel_type):

@@ -53,11 +53,13 @@ enum FilterRuntimeNumberKind : uint8_t {
  * Runtime sidecar (Lot A writes gain + flags + gain_at_last_cal_save).
  * Lot B fills filter/interval fields. 0xFF / NAN / interval 0 = unmanaged.
  *
- * Packed but 4-byte aligned after the uint8 header: unaligned floats
- * fault on ESP32-C3/C6. pad_align_[2] makes sizeof == 32 (no production
- * NVS yet — layout change is safe on this PR).
+ * Packed 32-byte layout matches Lot A production NVS (do not reorder).
+ * pad_align_[2] keeps floats at offset 12. alignas(4) is required so the
+ * instance itself is 4-byte aligned: packed structs are otherwise
+ * alignof(1), and writing max_jump / value_min / value_max faults on
+ * ESP32-C3/C6 if the object sits at offset 2 after neighbouring bools.
  */
-struct ChannelRuntimePrefsData {
+struct alignas(4) ChannelRuntimePrefsData {
   uint32_t magic;
   uint8_t version;
   uint8_t ads_gain;
@@ -78,6 +80,8 @@ static_assert(sizeof(ChannelRuntimePrefsData) == 32,
               "Lot A sidecar must be 32 bytes (4-byte aligned floats)");
 static_assert(sizeof(ChannelRuntimePrefsData) % 4 == 0,
               "Lot A sidecar size must be a multiple of 4");
+static_assert(alignof(ChannelRuntimePrefsData) >= 4,
+              "Lot A/B sidecar instances must be 4-byte aligned (ESP32 float access)");
 static_assert(offsetof(ChannelRuntimePrefsData, max_jump) == 12,
               "Lot A sidecar floats must start at offset 12");
 static_assert(offsetof(ChannelRuntimePrefsData, max_jump) % 4 == 0,
@@ -224,6 +228,25 @@ inline bool is_managed_u8(uint8_t value) { return value != GAIN_UNMANAGED; }
 inline bool is_managed_float(float value) { return !std::isnan(value); }
 
 inline bool is_managed_interval_ms(uint32_t ms) { return ms != 0; }
+
+/** NAN bounds are unbounded; finite inverted min>max is refused. */
+inline bool clamp_bounds_valid(float vmin, float vmax) {
+  if (std::isnan(vmin) || std::isnan(vmax)) {
+    return true;
+  }
+  return vmin <= vmax;
+}
+
+/** HA apply uses the 1–3600 s widget range. YAML seeds may be shorter. */
+inline uint32_t sanitize_update_interval_ms(uint32_t ms, bool ha_range) {
+  if (ha_range) {
+    return clamp_update_interval_ms(ms);
+  }
+  if (ms > UPDATE_INTERVAL_MS_MAX) {
+    return UPDATE_INTERVAL_MS_MAX;
+  }
+  return ms;
+}
 
 inline void init_unmanaged(ChannelRuntimePrefsData *data) {
   if (data == nullptr) {
