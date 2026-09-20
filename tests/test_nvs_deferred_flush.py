@@ -75,7 +75,6 @@ class NvsDirtyFlagDeclarationTest(unittest.TestCase):
         self.assertIn("nvs_dirty_since_ms_{0}", header)
         self.assertIn("nvs_pending_stamp_filters_{false}", header)
         self.assertIn("nvs_pending_stamp_interval_{false}", header)
-        self.assertIn("nvs_shutdown_hook_registered_{false}", header)
 
     def test_flush_methods_declared(self):
         with open(CHANNEL_H, encoding="utf-8") as handle:
@@ -83,7 +82,7 @@ class NvsDirtyFlagDeclarationTest(unittest.TestCase):
         self.assertIn("mark_nvs_dirty_", header)
         self.assertIn("flush_nvs_if_idle_", header)
         self.assertIn("flush_nvs_now_", header)
-        self.assertIn("register_shutdown_hook_", header)
+        self.assertIn("on_shutdown() override", header)
 
 
 class NvsMarkDirtyImplementationTest(unittest.TestCase):
@@ -174,26 +173,19 @@ class NvsFlushNowImplementationTest(unittest.TestCase):
 
 
 class NvsShutdownHookTest(unittest.TestCase):
-    """Verify shutdown hook registration."""
+    """Verify on_shutdown() hook flushes pending NVS."""
 
-    def test_shutdown_hook_registers(self):
+    def test_on_shutdown_flushes_if_dirty(self):
         with open(CHANNEL_CPP, encoding="utf-8") as handle:
             source = handle.read()
-        body = _fn(source, "void PoolStationChannelSensor::register_shutdown_hook_")
-        self.assertIn("App.register_shutdown_hook", body)
+        body = _fn(source, "void PoolStationChannelSensor::on_shutdown")
+        self.assertIn("nvs_dirty_", body)
         self.assertIn("flush_nvs_now_", body)
 
-    def test_shutdown_hook_guards_double_registration(self):
-        with open(CHANNEL_CPP, encoding="utf-8") as handle:
-            source = handle.read()
-        body = _fn(source, "void PoolStationChannelSensor::register_shutdown_hook_")
-        self.assertIn("nvs_shutdown_hook_registered_", body)
-
-    def test_shutdown_hook_called_in_setup(self):
-        with open(CHANNEL_CPP, encoding="utf-8") as handle:
-            source = handle.read()
-        body = _fn(source, "void PoolStationChannelSensor::setup")
-        self.assertIn("register_shutdown_hook_", body)
+    def test_on_shutdown_declared_in_header(self):
+        with open(CHANNEL_H, encoding="utf-8") as handle:
+            header = handle.read()
+        self.assertIn("void on_shutdown() override", header)
 
 
 class NvsLoopFlushTest(unittest.TestCase):

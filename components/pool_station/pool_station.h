@@ -289,6 +289,7 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+  void on_shutdown() override;
   float get_setup_priority() const override { return setup_priority::DATA - 1.0f; }
 
   // Configuration setters
@@ -514,7 +515,6 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void mark_nvs_dirty_(bool stamp_filters, bool stamp_interval);
   void flush_nvs_if_idle_(uint32_t now);
   void flush_nvs_now_();
-  void register_shutdown_hook_();
 
   bool ads_overlay_enabled_{false};
 #ifdef USE_ADS1115
@@ -555,7 +555,6 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   uint32_t nvs_dirty_since_ms_{0};
   bool nvs_pending_stamp_filters_{false};
   bool nvs_pending_stamp_interval_{false};
-  bool nvs_shutdown_hook_registered_{false};
 };
 
 
