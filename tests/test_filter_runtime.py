@@ -374,8 +374,9 @@ class CodegenContractTest(unittest.TestCase):
         self.assertIn("filters_persist_ && stamp_filters", save)
         self.assertIn("interval_persist_ && stamp_interval", save)
         # remember_gain_at_cal_save flushes immediately (critical user action)
+        # v0.10.4 fix: preserves pending stamps so filter/interval changes aren't lost
         remember = _fn(source, "void PoolStationChannelSensor::remember_gain_at_cal_save")
-        self.assertIn("save_runtime_preferences()", remember)
+        self.assertIn("save_runtime_preferences(this->nvs_pending_stamp_filters_", remember)
         self.assertNotIn("save_runtime_preferences(true", remember)
         # v0.10.4: deferred flush — apply_gain_runtime uses mark_nvs_dirty_
         apply_gain = _fn(source, "void PoolStationChannelSensor::apply_gain_runtime")

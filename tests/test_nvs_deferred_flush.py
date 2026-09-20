@@ -241,8 +241,19 @@ class NvsApplyMethodsUseDirtyFlagTest(unittest.TestCase):
         with open(CHANNEL_CPP, encoding="utf-8") as handle:
             source = handle.read()
         body = _fn(source, "void PoolStationChannelSensor::remember_gain_at_cal_save")
-        self.assertIn("save_runtime_preferences()", body)
+        self.assertIn("save_runtime_preferences(", body)
         self.assertIn("nvs_dirty_ = false", body)
+
+    def test_remember_gain_at_cal_save_preserves_pending_stamps(self):
+        """Ensure cal-save does not lose pending filter/interval stamps."""
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        body = _fn(source, "void PoolStationChannelSensor::remember_gain_at_cal_save")
+        # Must pass pending stamps to save, not just save_runtime_preferences()
+        self.assertIn("nvs_pending_stamp_filters_", body)
+        self.assertIn("nvs_pending_stamp_interval_", body)
+        # Verify they're passed as arguments to save, not just cleared
+        self.assertIn("save_runtime_preferences(this->nvs_pending_stamp_filters_", body)
 
 
 class NvsNoDirectSaveCallsTest(unittest.TestCase):

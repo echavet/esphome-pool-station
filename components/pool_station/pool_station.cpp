@@ -785,8 +785,10 @@ void PoolStationChannelSensor::remember_gain_at_cal_save() {
   this->gain_at_last_cal_save_ = this->gain_shadow_;
   // Calibration save is a critical user action — flush immediately.
   // Do not defer: losing gain_at_last_cal_save would break mismatch detection.
-  this->save_runtime_preferences();
-  // Clear any pending dirty state since we just saved.
+  // Preserve any pending stamps so filter/interval changes aren't lost.
+  this->save_runtime_preferences(this->nvs_pending_stamp_filters_,
+                                  this->nvs_pending_stamp_interval_);
+  // Clear pending dirty state since we just saved everything.
   this->nvs_dirty_ = false;
   this->nvs_pending_stamp_filters_ = false;
   this->nvs_pending_stamp_interval_ = false;
