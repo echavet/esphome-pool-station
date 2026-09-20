@@ -188,6 +188,7 @@ Indicateurs de *suspicion*, pas un diagnostic chimique. Opt-in YAML `interferenc
 | 6 | Gates/campaigns | ✅ Done |
 | 7 | HA polish, runtime algo select, draft/Save dirty UX | ✅ Done |
 | **8** | **Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw)** | ✅ **Current** |
+| **A/B** | Runtime ADS gain + saturation ; filtres HA-tunables | 📝 Design — [DESIGN-RUNTIME-ADS-AND-FILTERS.md](DESIGN-RUNTIME-ADS-AND-FILTERS.md) |
 
 ## 8. Critères d'acceptation
 

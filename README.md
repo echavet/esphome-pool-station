@@ -460,6 +460,7 @@ Use calibration mode when:
 | 6 | 0.6.0 | Gates/campaigns (conditional sampling) | ✅ Done |
 | **7** | **0.7.18** | HA polish, runtime algo select, draft/Save dirty UX, Lot-2 review-fix ports | ✅ Done |
 | **8** | **0.8.1** | Interference detection (orp↔pressure, ph↔orp, optional pH↔Tw) | ✅ **Current** |
+| **A/B** | — | Runtime ADS gain + saturation ; dynamic Lot 3 filters | 📝 [Design](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) |
 
 ### Lot 8 — Interference detection
 
@@ -744,6 +745,7 @@ Example entities for pH channel:
 
 - [CDC (Cahier des Charges)](docs/POOL-STATION-CDC.md) — Full requirements specification
 - [SENSOR-IDENTITY](docs/SENSOR-IDENTITY.md) — Anti-swap address binding table
+- [DESIGN-RUNTIME-ADS-AND-FILTERS](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md) — Design only: runtime ADS gain / saturation + dynamic Lot 3 filters (go/no-go per lot)
 - [CHANGELOG](CHANGELOG.md) — Version history
 - [Examples](examples/) — YAML configuration examples
 
