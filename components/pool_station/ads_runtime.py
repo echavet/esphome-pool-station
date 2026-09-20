@@ -98,6 +98,9 @@ UPDATE_INTERVAL_S_MAX = 3600
 UPDATE_INTERVAL_MS_MIN = 1000
 UPDATE_INTERVAL_MS_MAX = 3600 * 1000
 
+# NVS deferred flush debounce period (v0.10.4)
+NVS_FLUSH_DEBOUNCE_MS = 3000
+
 # Must match ads_runtime.h FilterRuntimeNumberKind
 FILTER_RT_SAMPLES = 0
 FILTER_RT_MAX_JUMP = 1
