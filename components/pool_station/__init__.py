@@ -40,10 +40,13 @@ from .ads_runtime import (
     GAIN_SELECT_OPTIONS,
     UPDATE_INTERVAL_S_MAX,
     UPDATE_INTERVAL_S_MIN,
+    ads_overlay_channel_error,
     ads_overlay_source_error,
     gain_float_to_code,
     id_type_name,
-    source_id_is_ads1115_sensor,
+    is_generic_sensor_type_name,
+    sensor_platform_for_id,
+    try_core_sensor_entries,
     validate_filter_runtime_seeds,
 )
 
@@ -492,7 +495,13 @@ def validate_ads_gain(value):
 
 
 def validate_channel_ads_overlay(config):
-    """ads: requires a typed ADS1115Sensor source — no silent static_cast."""
+    """ads: requires a native platform: ads1115 source — no silent static_cast.
+
+    cv.use_id(sensor.Sensor) types source_id as Sensor, so inherits_from(ADS1115Sensor)
+    is False for the compose model. Accept the source when CORE.config / type-name
+    show a real ads1115 sensor; defer a generic Sensor with no platform yet to
+    FINAL_VALIDATE_SCHEMA (full YAML is available then).
+    """
     ads_conf = config.get(CONF_ADS)
     if not ads_conf:
         return config
@@ -500,14 +509,26 @@ def validate_channel_ads_overlay(config):
     sat_off = ads_conf.get(CONF_SATURATION_OFF, 0.95)
     if sat_off >= sat_on:
         raise cv.Invalid("ads.saturation_off must be < ads.saturation_on")
+    err = ads_overlay_channel_error(config)
+    if not err:
+        return config
     source = config.get(CONF_SOURCE_ID)
     type_name = id_type_name(source)
-    # Prefer inherits_from(ADS1115Sensor) when the ESPHome type is importable;
-    # fall back to an exact type-name match (not a substring spoof).
-    ok = source_id_is_ads1115_sensor(source)
-    err = ads_overlay_source_error(True, type_name if not ok else "ADS1115Sensor")
-    if not ok and err:
-        raise cv.Invalid(err)
+    # Compose model: ID type is Sensor until FINAL_VALIDATE sees platform: ads1115.
+    if is_generic_sensor_type_name(type_name) and sensor_platform_for_id(source) is None:
+        return config
+    raise cv.Invalid(err or ads_overlay_source_error(True, type_name))
+
+
+def final_validate_ads_overlay(config):
+    """Walk CORE.config sensor entries after every platform has been validated."""
+    entries = try_core_sensor_entries()
+    channels = config.get(CONF_CHANNELS) or {}
+    for key in (CONF_PRESSURE, CONF_PH, CONF_ORP):
+        ch = channels.get(key)
+        err = ads_overlay_channel_error(ch, sensor_entries=entries)
+        if err:
+            raise cv.Invalid(err)
     return config
 
 
@@ -1141,6 +1162,11 @@ def interference_schema():
             InterferenceTwCouplingSensor, "mdi:thermometer-alert"
         ),
     })
+
+
+# After all platforms are in CORE.config: confirm ads: source_id is platform: ads1115.
+# inherits_from(ADS1115Sensor) is not sufficient — use_id types the ID as Sensor.
+FINAL_VALIDATE_SCHEMA = cv.All(final_validate_ads_overlay)
 
 
 # Main CONFIG_SCHEMA for pool_station platform

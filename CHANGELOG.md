@@ -1,3 +1,20 @@
+## [0.10.1] - 2026-09-20
+
+### Fixed — `ads:` overlay rejected native `platform: ads1115` sources
+
+Lot A validate used `cv.use_id(sensor.Sensor)`, so `source_id` was typed as
+`Sensor` and `inherits_from(ADS1115Sensor)` returned False. The helper then
+returned without checking the YAML platform — every compose-model `ads:`
+block failed on ESPHome 2026.4.3 (Eric OTA unblock).
+
+- Fall through from `inherits_from` (False or exception) to type-name /
+  `CORE.config` `sensor:` `platform: ads1115` lookup
+- `FINAL_VALIDATE_SCHEMA` walks the full config (do not rely on the ID
+  declared type being `ADS1115Sensor`)
+- Still rejects dallas / wifi_signal / other non-ADS sources with `ads:`
+
+---
+
 ## [0.10.0] - 2026-09-20
 
 ### Added — Lot B: runtime Lot 3 filters + channel interval
