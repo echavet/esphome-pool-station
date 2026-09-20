@@ -27,6 +27,19 @@ Per channel with `ads:`:
 
 Without `ads:`: existing YAML is unchanged (zero new entities).
 
+### Fixed — Lot A review (same PR, no version bump)
+
+- Overlay enable requires a successful ADS bind (`USE_ADS1115` + non-null `ads_`)
+- Sidecar packed struct: 2-byte pad before floats, 32-byte / 4-aligned
+  (no production NVS yet)
+- Auto-save NVS on every persist apply (not only when gain changes)
+- Saturation hysteresis keeps the latch on NaN raw / invalid FSR
+- Hold expiry uses unsigned wrap-safe elapsed
+- `apply_gain_runtime(persist)` also refuses in Calibration Mode
+- Validator prefers `inherits_from(ADS1115Sensor)` when importable
+- `static_assert` gain codes vs `ads1115::ADS1115Gain`
+- Save / Commit log uses the channel `sat_on` (not hardcoded 98 %)
+
 See [MIGRATION.md](docs/MIGRATION.md#runtime-ads-gain-lot-a-v090) and
 [DESIGN-RUNTIME-ADS-AND-FILTERS.md](docs/DESIGN-RUNTIME-ADS-AND-FILTERS.md).
 

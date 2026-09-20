@@ -305,7 +305,7 @@ void CalibrationSaveButton::press_action() {
   if (channel->refuse_calibration_save_if_saturated()) {
     ESP_LOGW(TAG,
              "Save refused: ADC saturated (|raw|>=%.0f%% FSR) for channel %d — live + flash unchanged",
-             100.0f * ads_runtime::SAT_ON_DEFAULT, this->channel_type_);
+             100.0f * channel->get_saturation_on(), this->channel_type_);
     channel->notify_calibration_updated();
     return;
   }
@@ -615,7 +615,7 @@ void CalibrationCommitButton::press_action() {
   if (channel->refuse_calibration_save_if_saturated()) {
     ESP_LOGW(TAG,
              "Commit refused: ADC saturated (|raw|>=%.0f%% FSR) for channel %d — live unchanged",
-             100.0f * ads_runtime::SAT_ON_DEFAULT, this->channel_type_);
+             100.0f * channel->get_saturation_on(), this->channel_type_);
     channel->notify_calibration_updated();
     return;
   }

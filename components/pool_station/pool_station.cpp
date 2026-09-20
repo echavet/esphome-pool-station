@@ -605,6 +605,18 @@ void PoolStationChannelSensor::set_ads1115_sensor(sensor::Sensor *sensor) {
 #endif
 }
 
+void PoolStationChannelSensor::set_ads_overlay_enabled(bool enabled) {
+#ifdef USE_ADS1115
+  // Codegen may call set_ads_overlay_enabled(true) after bind. Never enable
+  // the overlay without a typed ADS pointer — otherwise HA would "change
+  // gain" without set_gain() (USE_ADS1115 off or failed bind).
+  this->ads_overlay_enabled_ = enabled && (this->ads_ != nullptr);
+#else
+  this->ads_overlay_enabled_ = false;
+  (void) enabled;
+#endif
+}
+
 void PoolStationChannelSensor::set_runtime_preferences_key(uint32_t key) {
   this->runtime_prefs_key_ = key;
 }
@@ -633,10 +645,21 @@ void PoolStationChannelSensor::apply_gain_runtime(uint8_t gain_code, bool persis
              this->get_channel_type_name(), gain_code);
     return;
   }
+  // Defense in depth: persist=true is a user-facing apply. Soft-lock while
+  // Calibration Mode is ON (select / reset YAML already refuse; NVS load
+  // uses persist=false and still applies at setup).
+  if (persist && this->parent_ != nullptr && this->parent_->is_calibration_mode()) {
+    ESP_LOGW(TAG, "Channel %s: ADS gain apply refused: Calibration Mode ON — select unchanged",
+             this->get_channel_type_name());
+    this->publish_ads_ui_();
+    return;
+  }
   const bool changed = (gain_code != this->gain_shadow_);
   this->gain_shadow_ = gain_code;
   this->apply_ads_gain_to_source_();
-  if (persist && changed) {
+  // Design §5.3: auto-save NVS on every persist apply (including first HA
+  // apply of the YAML-same gain so NVS wins after reboot).
+  if (persist) {
     this->save_runtime_preferences();
   }
   this->publish_ads_ui_();
@@ -770,7 +793,7 @@ void PoolStationChannelSensor::expire_saturation_hold_(uint32_t now) {
   if (!this->sat_published_ || this->sat_raw_latched_) {
     return;
   }
-  if (now - this->sat_last_on_ms_ >= this->sat_hold_ms_) {
+  if (ads_runtime::saturation_hold_expired(now, this->sat_last_on_ms_, this->sat_hold_ms_)) {
     this->sat_published_ = false;
     if (this->saturated_sensor_ != nullptr) {
       this->saturated_sensor_->publish_state(false);

@@ -381,6 +381,7 @@ struct ChannelRuntimePrefsData {
   uint8_t  filter_samples;
   uint8_t  max_jump_streak;
   uint8_t  flags;              // bit0 has_vmin, bit1 has_vmax, bit2 has_gain, …
+  uint8_t  pad_align[2];       // floats 4-byte aligned (ESP32-C3); sizeof=32
   float    max_jump;
   float    value_min;
   float    value_max;

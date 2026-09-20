@@ -369,7 +369,7 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
 
   // Lot A: runtime ADS overlay (opt-in). Does not own the ADC driver.
   void set_ads1115_sensor(sensor::Sensor *sensor);
-  void set_ads_overlay_enabled(bool enabled) { this->ads_overlay_enabled_ = enabled; }
+  void set_ads_overlay_enabled(bool enabled);
   void set_ads_yaml_gain(uint8_t gain_code) { this->yaml_gain_ = gain_code; }
   void set_saturation_on(float ratio) { this->sat_on_ = ratio; }
   void set_saturation_off(float ratio) { this->sat_off_ = ratio; }
@@ -392,6 +392,7 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   bool is_adc_saturated() const { return this->is_adc_saturated(this->last_raw_value_); }
   bool refuse_calibration_save_if_saturated() const;
   uint8_t get_gain_shadow() const { return this->gain_shadow_; }
+  float get_saturation_on() const { return this->sat_on_; }
   bool is_ads_overlay_enabled() const { return this->ads_overlay_enabled_; }
   bool is_gain_mismatch() const;
 

@@ -110,10 +110,23 @@ class AdsHysteresisTest(unittest.TestCase):
         self.assertFalse(state)
 
     def test_nan_and_zero_fsr(self):
-        self.assertFalse(ads.saturation_hysteresis(math.nan, 4.096, 0.98, 0.95, True))
-        self.assertFalse(ads.saturation_hysteresis(4.0, 0.0, 0.98, 0.95, True))
+        # NaN / invalid FSR keep the previous latch (do not clear a rail alarm).
+        self.assertTrue(ads.saturation_hysteresis(math.nan, 4.096, 0.98, 0.95, True))
+        self.assertFalse(ads.saturation_hysteresis(math.nan, 4.096, 0.98, 0.95, False))
+        self.assertTrue(ads.saturation_hysteresis(4.0, 0.0, 0.98, 0.95, True))
+        self.assertFalse(ads.saturation_hysteresis(4.0, 0.0, 0.98, 0.95, False))
         self.assertFalse(ads.above_sat_on(math.nan, 4.096))
         self.assertTrue(math.isnan(ads.fsr_percent(math.nan, 4.096)))
+
+    def test_hold_expiry_is_uint32_wrap_safe(self):
+        hold = 15000
+        self.assertFalse(ads.saturation_hold_expired(100, 0, hold))
+        self.assertTrue(ads.saturation_hold_expired(15000, 0, hold))
+        last_on = 0xFFFFFFF0
+        now_short = (last_on + 200) & 0xFFFFFFFF
+        self.assertFalse(ads.saturation_hold_expired(now_short, last_on, hold))
+        now_expired = (last_on + 20000) & 0xFFFFFFFF
+        self.assertTrue(ads.saturation_hold_expired(now_expired, last_on, hold))
 
 
 class AdsSourceValidatorTest(unittest.TestCase):
@@ -127,6 +140,8 @@ class AdsSourceValidatorTest(unittest.TestCase):
         self.assertFalse(ads.source_type_is_ads1115_sensor("Sensor"))
         self.assertFalse(ads.source_type_is_ads1115_sensor("DallasTemperatureSensor"))
         self.assertFalse(ads.source_type_is_ads1115_sensor(""))
+        self.assertFalse(ads.source_type_is_ads1115_sensor("FakeADS1115Sensor"))
+        self.assertFalse(ads.source_type_is_ads1115_sensor("ADS1115SensorWrapper"))
 
     def test_overlay_error_only_when_ads_block(self):
         self.assertIsNone(ads.ads_overlay_source_error(False, "Sensor"))
@@ -144,6 +159,46 @@ class AdsSourceValidatorTest(unittest.TestCase):
 
         self.assertEqual(ads.id_type_name(IdObj()), "ADS1115Sensor")
         self.assertEqual(ads.id_type_name(None), "")
+
+    def test_inherits_from_preferred_when_importable(self):
+        class FakeAds:
+            pass
+
+        class TypeYes:
+            _name = "NotASubstringMatch"
+
+            def inherits_from(self, cls):
+                return cls is FakeAds
+
+        class IdYes:
+            type = TypeYes()
+
+        class TypeSpoof:
+            _name = "ADS1115Sensor"
+
+            def inherits_from(self, cls):
+                return False
+
+        class IdSpoof:
+            type = TypeSpoof()
+
+        orig = ads._try_import_ads1115_sensor
+        ads._try_import_ads1115_sensor = lambda: FakeAds
+        try:
+            self.assertTrue(ads.source_id_is_ads1115_sensor(IdYes()))
+            self.assertFalse(ads.source_id_is_ads1115_sensor(IdSpoof()))
+        finally:
+            ads._try_import_ads1115_sensor = orig
+
+    def test_source_id_falls_back_to_type_name_without_import(self):
+        class TypeObj:
+            _name = "ADS1115Sensor"
+
+        class IdObj:
+            type = TypeObj()
+
+        self.assertTrue(ads.source_id_is_ads1115_sensor(IdObj()))
+        self.assertFalse(ads.source_id_is_ads1115_sensor(None))
 
 
 class AdsCodegenContractTest(unittest.TestCase):
@@ -188,6 +243,8 @@ class AdsCodegenContractTest(unittest.TestCase):
         self.assertIn("refuse_calibration_save_if_saturated", source)
         self.assertIn("remember_gain_at_cal_save", source)
         self.assertIn("Calibration Mode ON", source)
+        self.assertIn("get_saturation_on()", source)
+        self.assertNotIn("100.0f * ads_runtime::SAT_ON_DEFAULT", source)
 
     def test_no_cal_magic_bump(self):
         with open(ENGINE_H, encoding="utf-8") as handle:
@@ -201,6 +258,49 @@ class AdsCodegenContractTest(unittest.TestCase):
             source = handle.read()
         self.assertIn("calibration volts unchanged", source)
         self.assertNotIn("live_points_", source.split("apply_gain_runtime")[1][:800])
+
+    def test_apply_gain_runtime_persists_even_if_unchanged(self):
+        cpp = os.path.join(ROOT, "components", "pool_station", "pool_station.cpp")
+        with open(cpp, encoding="utf-8") as handle:
+            source = handle.read()
+        apply = source.split("void PoolStationChannelSensor::apply_gain_runtime")[1].split(
+            "void PoolStationChannelSensor::reset_ads_to_yaml"
+        )[0]
+        self.assertIn("if (persist)", apply)
+        self.assertNotIn("persist && changed", apply)
+        self.assertIn("is_calibration_mode()", apply)
+
+    def test_overlay_enable_requires_ads_bind(self):
+        cpp = os.path.join(ROOT, "components", "pool_station", "pool_station.cpp")
+        with open(cpp, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("enabled && (this->ads_ != nullptr)", source)
+
+    def test_hold_uses_wrap_safe_helper(self):
+        cpp = os.path.join(ROOT, "components", "pool_station", "pool_station.cpp")
+        with open(cpp, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("saturation_hold_expired", source)
+
+    def test_sidecar_packed_layout_is_32_and_aligned(self):
+        import struct
+
+        self.assertEqual(ads.CHANNEL_RUNTIME_PREFS_SIZE, 32)
+        self.assertEqual(ads.CHANNEL_RUNTIME_PREFS_FLOAT_OFFSET, 12)
+        self.assertEqual(struct.calcsize(ads.CHANNEL_RUNTIME_PREFS_FORMAT), 32)
+        with open(ADS_H, encoding="utf-8") as handle:
+            header = handle.read()
+        self.assertIn("pad_align_[2]", header)
+        self.assertIn("sizeof(ChannelRuntimePrefsData) == 32", header)
+        self.assertIn("offsetof(ChannelRuntimePrefsData, max_jump) == 12", header)
+        self.assertIn("ADS1115_GAIN_6P144", header)
+        self.assertIn("USE_ADS1115", header)
+
+    def test_validator_uses_inherits_from_first(self):
+        with open(INIT_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("source_id_is_ads1115_sensor", source)
+        self.assertIn("inherits_from(ADS1115Sensor)", source)
 
 
 class AdsGainRoundTripTest(unittest.TestCase):

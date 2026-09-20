@@ -415,12 +415,14 @@ pool_station:
 Rules:
 
 - **Calibration stays in volts.** Changing 4.096 → 6.144 does not rescale X/Y.
-- **NVS sidecar** `ps-md5-rt-v1` stores the HA gain. Calibration key
+- **NVS sidecar** `ps-md5-rt-v1` stores the HA gain (32-byte packed blob,
+  floats 4-byte aligned). Calibration key
   `ps-md5-v1` / magic `0xCA110005` is **not** bumped — no forced recapture.
 - After a HA gain change, **NVS wins** over a later YAML `gain:` edit.
   Use `reset_yaml_button` to reload the YAML seed.
 - **Calibration Mode ON** soft-locks the gain select (write refused).
-- **Save is refused** if `|raw| ≥ 98 %` of the current FSR (do not persist a rail).
+- **Save is refused** if `|raw| ≥ sat_on` of the current FSR (default 98 %;
+  do not persist a rail).
 - `saturated` is an ADC health flag, not Lot 4 `out_of_range` (chemistry units).
 - Leave `continuous_mode: false` on a shared ADS. Do not HA-tune the mux.
 

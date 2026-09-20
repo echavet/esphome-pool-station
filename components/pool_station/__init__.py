@@ -33,7 +33,7 @@ from .ads_runtime import (
     ads_overlay_source_error,
     gain_float_to_code,
     id_type_name,
-    source_type_is_ads1115_sensor,
+    source_id_is_ads1115_sensor,
 )
 
 CODEOWNERS = ["@echavet"]
@@ -480,16 +480,9 @@ def validate_channel_ads_overlay(config):
         raise cv.Invalid("ads.saturation_off must be < ads.saturation_on")
     source = config.get(CONF_SOURCE_ID)
     type_name = id_type_name(source)
-    ok = source_type_is_ads1115_sensor(type_name)
-    if not ok:
-        type_obj = getattr(source, "type", None)
-        inherits = getattr(type_obj, "inherits_from", None)
-        if callable(inherits):
-            try:
-                from esphome.components.ads1115.sensor import ADS1115Sensor
-                ok = bool(inherits(ADS1115Sensor))
-            except Exception:  # pragma: no cover - missing ads1115 component
-                ok = False
+    # Prefer inherits_from(ADS1115Sensor) when the ESPHome type is importable;
+    # fall back to an exact type-name match (not a substring spoof).
+    ok = source_id_is_ads1115_sensor(source)
     err = ads_overlay_source_error(True, type_name if not ok else "ADS1115Sensor")
     if not ok and err:
         raise cv.Invalid(err)

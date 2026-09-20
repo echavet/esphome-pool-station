@@ -72,6 +72,11 @@ ADS_OVERLAY_SOURCE_ERROR = (
 RUNTIME_PREFS_MAGIC = 0xA0511115
 CALIBRATION_PREFS_MAGIC = 0xCA110005
 
+# Packed sidecar: 4 + 6 + 2 pad + 3*4 + 4 + 4 = 32 (floats at offset 12).
+CHANNEL_RUNTIME_PREFS_SIZE = 32
+CHANNEL_RUNTIME_PREFS_FLOAT_OFFSET = 12
+CHANNEL_RUNTIME_PREFS_FORMAT = "<I6B2x3fI4B"
+
 
 def is_valid_gain_code(code):
     return 0 <= int(code) <= GAIN_0P256
@@ -116,9 +121,15 @@ def above_sat_on(raw_v, fsr_v, sat_on=SAT_ON_DEFAULT):
 
 
 def saturation_hysteresis(abs_raw, fsr_v, sat_on, sat_off, previous):
-    """ON at sat_on*FSR, OFF at sat_off*FSR, else keep previous."""
-    if fsr_v <= 0.0 or abs_raw is None or math.isnan(abs_raw):
-        return False
+    """ON at sat_on*FSR, OFF at sat_off*FSR, else keep previous.
+
+    NaN raw or invalid FSR keep the previous latch so a missing sample
+    does not clear a rail alarm.
+    """
+    if abs_raw is None or (isinstance(abs_raw, float) and math.isnan(abs_raw)):
+        return previous
+    if fsr_v <= 0.0:
+        return previous
     if abs_raw >= sat_on * fsr_v:
         return True
     if abs_raw <= sat_off * fsr_v:
@@ -126,11 +137,44 @@ def saturation_hysteresis(abs_raw, fsr_v, sat_on, sat_off, previous):
     return previous
 
 
+def saturation_hold_expired(now_ms, last_on_ms, hold_ms):
+    """uint32 millis wrap-safe hold expiry (mirrors ads_runtime.h)."""
+    elapsed = (int(now_ms) - int(last_on_ms)) & 0xFFFFFFFF
+    return elapsed >= int(hold_ms)
+
+
 def source_type_is_ads1115_sensor(type_name):
+    """Exact type name / suffix — not a substring (rejects FakeADS1115Sensor)."""
     if not type_name:
         return False
     name = str(type_name)
-    return any(marker in name for marker in ADS1115_TYPE_MARKERS)
+    if name in ADS1115_TYPE_MARKERS or name == "ADS1115Sensor":
+        return True
+    return name.endswith("::ADS1115Sensor") or name.endswith(".ADS1115Sensor")
+
+
+def _try_import_ads1115_sensor():
+    try:
+        from esphome.components.ads1115.sensor import ADS1115Sensor
+
+        return ADS1115Sensor
+    except Exception:  # pragma: no cover - host tests have no ESPHome ads1115
+        return None
+
+
+def source_id_is_ads1115_sensor(source_id):
+    """Prefer inherits_from(ADS1115Sensor) when the ESPHome type is importable."""
+    if source_id is None:
+        return False
+    type_obj = getattr(source_id, "type", None)
+    inherits = getattr(type_obj, "inherits_from", None)
+    ads_cls = _try_import_ads1115_sensor()
+    if callable(inherits) and ads_cls is not None:
+        try:
+            return bool(inherits(ads_cls))
+        except Exception:
+            return False
+    return source_type_is_ads1115_sensor(id_type_name(source_id))
 
 
 def id_type_name(source_id):
