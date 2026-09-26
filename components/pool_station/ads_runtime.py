@@ -98,8 +98,12 @@ UPDATE_INTERVAL_S_MAX = 3600
 UPDATE_INTERVAL_MS_MIN = 1000
 UPDATE_INTERVAL_MS_MAX = 3600 * 1000
 
-# NVS deferred flush debounce period (v0.10.4)
+# NVS deferred flush quiet-period (v0.10.4; timer reset each dirty since v0.10.6)
 NVS_FLUSH_DEBOUNCE_MS = 3000
+
+# Lot A fsr_percent publish gate (v0.10.6)
+FSR_PUBLISH_DELTA_PERCENT = 0.5
+FSR_PUBLISH_MAX_INTERVAL_MS = 5000
 
 # Must match ads_runtime.h FilterRuntimeNumberKind
 FILTER_RT_SAMPLES = 0

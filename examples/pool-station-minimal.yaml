@@ -64,6 +64,20 @@ logger:
     pool_station.cal: DEBUG
     pool_station.ui: DEBUG
 
+# Optional host-side stability sensors (parent YAML / stock ESPHome — not
+# built into pool_station). Useful after OTA to confirm heap/loop headroom:
+#   debug:
+#     update_interval: 30s
+#   sensor:
+#     - platform: debug
+#       free:
+#         name: "Pool Station Free Heap"
+#       block:
+#         name: "Pool Station Max Block"
+#       loop_time:
+#         name: "Pool Station Loop Time"
+# Parent may instead keep stock uptime / wifi_signal / wifi_info.
+
 # Enable Home Assistant API
 api:
   encryption:
@@ -81,11 +95,25 @@ i2c:
   sda: GPIO5
   scl: GPIO4
   scan: true
+  # Prod note (v0.10.6): consider an explicit bus timeout so a stuck ADS/I2C
+  # transaction cannot starve Wi-Fi. ESPHome `i2c.timeout` is YAML-only —
+  # the upstream ADS1115 driver does not expose a separate software timeout.
+  # Example: timeout: 10ms
+  # timeout: 10ms
 
 # =============================================================================
 # ADS1115 ADC (native ESPHome component)
 # Address 0x48 (ADDR pin to GND)
 # =============================================================================
+# Prod notes (v0.10.6 stability):
+#   - Align ADS source `update_interval` with channel `update_interval` (or
+#     slightly faster). Over-sampling the ADS (e.g. 1s ADS + 60s channel)
+#     wastes I2C bandwidth; the channel already throttles publishes.
+#   - `continuous_mode: false` (single-shot) is the safer default for multi-
+#     channel mux sharing. continuous_mode: true can reduce latency but
+#     increases bus traffic — only enable if you have measured I2C headroom.
+#   - I2C transaction timeout is a YAML/upstream concern (see i2c.timeout
+#     above); pool_station cannot patch the ESPHome ADS driver.
 ads1115:
   - address: 0x48
     id: ads
@@ -106,6 +134,10 @@ one_wire:
 # ADS1115 Source Sensors
 # These are the RAW ADC readings that pool_station channels consume.
 # Gain 4.096 gives ±4.096V range (resolution ~0.125mV)
+#
+# Prod (v0.10.6): example uses 1s ADS + slower channel intervals for Capturer
+# responsiveness. For quiet HA API / lower I2C load, raise ADS intervals to
+# match channel update_interval (e.g. both 60s for pH/ORP).
 # =============================================================================
 sensor:
   # ---------------------------------------------------------------------------
