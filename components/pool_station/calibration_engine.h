@@ -220,6 +220,14 @@ class CalibrationEngine {
   // Polynomial helper: least squares fit
   void compute_polynomial_coefficients_() const;
 
+  // Invalidate cached fits when live points / algorithm change (v0.10.6).
+  void invalidate_fit_caches_() const;
+
+  // Lazily rebuild LINEAR slope/intercept (avoids per-sample vector alloc).
+  void ensure_linear_cache_() const;
+  // Lazily rebuild sorted PIECEWISE point list (avoids per-sample copy+sort).
+  void ensure_piecewise_cache_() const;
+
   // Apply YAML precision_decimals_ to a calibrated value.
   float apply_precision_(float value) const;
 
@@ -271,6 +279,16 @@ class CalibrationEngine {
   // Polynomial coefficients (computed on demand, uses live points)
   mutable std::vector<float> poly_coeffs_;
   mutable bool poly_coeffs_valid_{false};
+
+  // LINEAR fit cache (v0.10.6 hot-path): rebuild only when points/type change
+  mutable bool linear_cache_valid_{false};
+  mutable bool linear_cache_ok_{false};
+  mutable float linear_slope_{0.0f};
+  mutable float linear_intercept_{0.0f};
+
+  // PIECEWISE sorted-valid-points cache (v0.10.6 hot-path)
+  mutable bool piecewise_cache_valid_{false};
+  mutable std::vector<CalibrationPoint> piecewise_pts_;
   
   // Preferences
   uint32_t prefs_key_{0};

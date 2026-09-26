@@ -15,7 +15,7 @@ const char *CalibrationEngine::get_type_name() const {
 void CalibrationEngine::set_type(CalibrationType type) {
   this->type_ = type;
   this->live_type_ = type;
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
 }
 
 void CalibrationEngine::set_type_runtime(CalibrationType type) {
@@ -29,7 +29,7 @@ void CalibrationEngine::set_type_runtime(CalibrationType type) {
     this->mark_draft_dirty_();
   } else {
     this->live_type_ = type;
-    this->poly_coeffs_valid_ = false;
+    this->invalidate_fit_caches_();
   }
   
   ESP_LOGI(CAL_TAG, "Calibration algorithm changed: %s -> %s%s", 
@@ -92,7 +92,7 @@ void CalibrationEngine::add_point(float x, float y) {
   pt.x = x;
   pt.y = y;
   points.push_back(pt);
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   // Do not sort: HA Capturer entities map to slot indices.
   
@@ -113,7 +113,7 @@ void CalibrationEngine::set_point(size_t index, float x, float y) {
   
   points[index].x = x;
   points[index].y = y;
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   // Do not re-sort: keep HA slot indices stable.
   
@@ -132,7 +132,7 @@ void CalibrationEngine::remove_point(size_t index) {
   }
   
   points.erase(points.begin() + index);
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   this->mark_draft_dirty_();
   
@@ -145,7 +145,7 @@ void CalibrationEngine::remove_point(size_t index) {
 void CalibrationEngine::clear_points() {
   auto &points = this->points_();
   points.clear();
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   this->mark_draft_dirty_();
   
@@ -174,7 +174,7 @@ const std::vector<CalibrationPoint> &CalibrationEngine::get_points() const {
 void CalibrationEngine::set_seed_points(const std::vector<CalibrationPoint> &points) {
   // Seed points go to live set in YAML/slot order (do not sort).
   this->live_points_ = points;
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   if (this->draft_mode_enabled_) {
     this->sync_draft_from_live();
@@ -244,7 +244,7 @@ void CalibrationEngine::commit_draft() {
   this->live_points_ = this->draft_points_;
   this->commit_working_params_to_live_();
   this->has_draft_changes_ = false;
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   ESP_LOGI(CAL_TAG, "Committed %zu draft points to live calibration (type=%s)",
            this->live_points_.size(), calibration_type_name(this->live_type_));
@@ -415,13 +415,28 @@ float CalibrationEngine::calibrate(float raw_voltage) const {
   return this->apply_precision_(result);
 }
 
-float CalibrationEngine::calibrate_linear_(float x) const {
+void CalibrationEngine::invalidate_fit_caches_() const {
+  this->poly_coeffs_valid_ = false;
+  this->linear_cache_valid_ = false;
+  this->linear_cache_ok_ = false;
+  this->piecewise_cache_valid_ = false;
+}
+
+void CalibrationEngine::ensure_linear_cache_() const {
+  if (this->linear_cache_valid_) {
+    return;
+  }
+  this->linear_cache_valid_ = true;
+  this->linear_cache_ok_ = false;
+  this->linear_slope_ = 0.0f;
+  this->linear_intercept_ = 0.0f;
+
   // Least-squares fit on all valid live points (N==2 equals the two-point line).
   // Do not mutate live_points_ — HA slots stay in capture/YAML order.
   auto pts = this->valid_points_copy_(this->live_points_, false);
   if (pts.size() < 2) {
     ESP_LOGW(CAL_TAG, "Linear calibration needs 2 points, have %zu", pts.size());
-    return x;
+    return;
   }
 
   double n = static_cast<double>(pts.size());
@@ -441,12 +456,25 @@ float CalibrationEngine::calibrate_linear_(float x) const {
   double denom = n * sum_xx - sum_x * sum_x;
   if (std::abs(denom) < 1e-12) {
     ESP_LOGW(CAL_TAG, "Linear calibration: points have same x value");
-    return static_cast<float>(sum_y / n);
+    this->linear_slope_ = 0.0f;
+    this->linear_intercept_ = static_cast<float>(sum_y / n);
+    this->linear_cache_ok_ = true;
+    return;
   }
 
   double slope = (n * sum_xy - sum_x * sum_y) / denom;
   double intercept = (sum_y - slope * sum_x) / n;
-  return static_cast<float>(intercept + slope * static_cast<double>(x));
+  this->linear_slope_ = static_cast<float>(slope);
+  this->linear_intercept_ = static_cast<float>(intercept);
+  this->linear_cache_ok_ = true;
+}
+
+float CalibrationEngine::calibrate_linear_(float x) const {
+  this->ensure_linear_cache_();
+  if (!this->linear_cache_ok_) {
+    return x;
+  }
+  return this->linear_intercept_ + this->linear_slope_ * x;
 }
 
 float CalibrationEngine::calibrate_polynomial_(float x) const {
@@ -473,7 +501,7 @@ float CalibrationEngine::calibrate_polynomial_(float x) const {
 
 void CalibrationEngine::compute_polynomial_coefficients_() const {
   this->poly_coeffs_.clear();
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
   
   // Always use live points for actual calibration (skip invalid slots)
   auto pts = this->valid_points_copy_(this->live_points_, false);
@@ -568,14 +596,23 @@ void CalibrationEngine::compute_polynomial_coefficients_() const {
   }
 }
 
-float CalibrationEngine::calibrate_piecewise_(float x) const {
+void CalibrationEngine::ensure_piecewise_cache_() const {
+  if (this->piecewise_cache_valid_) {
+    return;
+  }
   // Sort a working copy only — stored slot indices stay YAML/HA stable.
-  auto pts = this->valid_points_copy_(this->live_points_, true);
+  this->piecewise_pts_ = this->valid_points_copy_(this->live_points_, true);
+  this->piecewise_cache_valid_ = true;
+}
+
+float CalibrationEngine::calibrate_piecewise_(float x) const {
+  this->ensure_piecewise_cache_();
+  const auto &pts = this->piecewise_pts_;
   if (pts.size() < 2) {
     ESP_LOGW(CAL_TAG, "Piecewise calibration needs at least 2 points, have %zu", pts.size());
     return x;
   }
-  
+
   // Below first point: extrapolate from first segment
   if (x <= pts.front().x) {
     const CalibrationPoint &p1 = pts[0];
@@ -583,7 +620,7 @@ float CalibrationEngine::calibrate_piecewise_(float x) const {
     float slope = (p2.y - p1.y) / (p2.x - p1.x);
     return p1.y + (x - p1.x) * slope;
   }
-  
+
   // Above last point: extrapolate from last segment
   if (x >= pts.back().x) {
     size_t n = pts.size();
@@ -592,12 +629,11 @@ float CalibrationEngine::calibrate_piecewise_(float x) const {
     float slope = (p2.y - p1.y) / (p2.x - p1.x);
     return p2.y + (x - p2.x) * slope;
   }
-  
-  // Find segment [i, i+1] where pts[i].x <= x < pts[i+1].x
+
+  // Find segment [i, i+1] where pts[i].x <= x <= pts[i+1].x
   for (size_t i = 0; i < pts.size() - 1; i++) {
     const CalibrationPoint &p1 = pts[i];
     const CalibrationPoint &p2 = pts[i + 1];
-    
     if (x >= p1.x && x <= p2.x) {
       if (std::abs(p2.x - p1.x) < 1e-9f) {
         return p1.y;
@@ -606,7 +642,7 @@ float CalibrationEngine::calibrate_piecewise_(float x) const {
       return p1.y + (x - p1.x) * slope;
     }
   }
-  
+
   // Fallback (shouldn't reach here)
   return x;
 }
@@ -674,7 +710,7 @@ void CalibrationEngine::load_from_preferences() {
     this->live_points_.push_back(pt);
   }
   
-  this->poly_coeffs_valid_ = false;
+  this->invalidate_fit_caches_();
 
   // Prefs load happens after codegen enable_draft_mode() — refresh draft so
   // UI numbers match committed flash, not YAML seeds. Browser refresh is not undo.

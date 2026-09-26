@@ -43,41 +43,47 @@ void DiagnosticsWindow::clear() {
 
 DiagnosticsStats DiagnosticsWindow::compute_stats() const {
   DiagnosticsStats stats;
-  
+
   if (this->count_ == 0) {
     return stats;
   }
-  
-  std::vector<float> valid;
-  valid.reserve(this->count_);
-  
+
+  // Single-pass Welford + min/max — no temporary vector (v0.10.6 / PR #35).
+  double mean = 0.0;
+  double m2 = 0.0;
+  size_t n = 0;
+  float min_v = std::numeric_limits<float>::max();
+  float max_v = std::numeric_limits<float>::lowest();
+
   for (size_t i = 0; i < this->count_; i++) {
     float v = this->buffer_[i];
-    if (!std::isnan(v)) {
-      valid.push_back(v);
+    if (std::isnan(v)) {
+      continue;
     }
+    n++;
+    double delta = static_cast<double>(v) - mean;
+    mean += delta / static_cast<double>(n);
+    double delta2 = static_cast<double>(v) - mean;
+    m2 += delta * delta2;
+    min_v = std::min(min_v, v);
+    max_v = std::max(max_v, v);
   }
-  
-  if (valid.empty()) {
+
+  if (n == 0) {
     return stats;
   }
-  
-  stats.sample_count = valid.size();
-  
-  float sum = 0.0f;
-  stats.min = std::numeric_limits<float>::max();
-  stats.max = std::numeric_limits<float>::lowest();
-  
-  for (float v : valid) {
-    sum += v;
-    stats.min = std::min(stats.min, v);
-    stats.max = std::max(stats.max, v);
+
+  stats.sample_count = n;
+  stats.mean = static_cast<float>(mean);
+  stats.min = min_v;
+  stats.max = max_v;
+  stats.ptp = max_v - min_v;
+  if (n >= 2) {
+    stats.sigma = static_cast<float>(std::sqrt(m2 / static_cast<double>(n - 1)));
+  } else {
+    stats.sigma = 0.0f;
   }
-  
-  stats.mean = sum / static_cast<float>(valid.size());
-  stats.ptp = stats.max - stats.min;
-  stats.sigma = diagnostic_functions::compute_stddev(valid);
-  
+
   return stats;
 }
 

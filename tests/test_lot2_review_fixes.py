@@ -208,11 +208,19 @@ class SourceScanTest(unittest.TestCase):
         self.assertIn("parent.set_calibration_mode_switch(var)", switch_py)
 
     def test_linear_is_least_squares(self):
-        linear = self.cpp[self.cpp.find("float CalibrationEngine::calibrate_linear_") :]
-        linear = linear.split("float CalibrationEngine::calibrate_polynomial_")[0]
+        # v0.10.6: least-squares lives in ensure_linear_cache_ (cached hot path)
+        linear = self.cpp[self.cpp.find("void CalibrationEngine::ensure_linear_cache_") :]
+        linear = linear.split("float CalibrationEngine::calibrate_linear_")[0]
         self.assertIn("sum_xy", linear)
         self.assertNotIn("live_points_.front()", linear)
         self.assertNotIn("live_points_.back()", linear)
+        cal = self._fn_linear()
+        self.assertIn("ensure_linear_cache_", cal)
+
+    def _fn_linear(self):
+        start = self.cpp.find("float CalibrationEngine::calibrate_linear_")
+        end = self.cpp.find("float CalibrationEngine::calibrate_polynomial_", start)
+        return self.cpp[start:end]
 
     def test_init_does_not_register_component_on_numbers(self):
         """Guard against the Lot-2 WIP / v0.7.14 double-register regression."""

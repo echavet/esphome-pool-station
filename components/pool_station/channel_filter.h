@@ -53,6 +53,8 @@ class SlidingWindow {
   size_t head_{0};
   size_t count_{0};
   std::vector<float> buffer_;
+  // Reused by median() so hot-path sampling does not allocate every call (v0.10.6 / PR #35).
+  mutable std::vector<float> scratch_;
 };
 
 /**
@@ -102,7 +104,8 @@ namespace filter_functions {
  * Compute median of a vector of values.
  * Returns NAN if empty.
  */
-float compute_median(std::vector<float> values);
+/** Compute median in-place (mutates values). Prefer over a by-value copy on the hot path. */
+float compute_median(std::vector<float> &values);
 
 /**
  * Compute mean of a vector of values.

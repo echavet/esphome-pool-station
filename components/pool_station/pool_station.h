@@ -511,10 +511,14 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   void persist_interval_if_(bool persist);
   void apply_nvs_filter_fields_(const ads_runtime::ChannelRuntimePrefsData &data);
 
-  // NVS deferred flush (v0.10.4): coalesce rapid changes into one save
+  // NVS deferred flush (v0.10.4/0.10.6): coalesce rapid changes into one save
   void mark_nvs_dirty_(bool stamp_filters, bool stamp_interval);
   void flush_nvs_if_idle_(uint32_t now);
   void flush_nvs_now_();
+
+  // Publish helpers (v0.10.6): binaries on transition; fsr% delta/interval gated
+  void publish_binary_if_changed_(binary_sensor::BinarySensor *sensor, bool value);
+  void publish_fsr_percent_gated_(float raw, uint32_t now);
 
   bool ads_overlay_enabled_{false};
 #ifdef USE_ADS1115
@@ -550,11 +554,15 @@ class PoolStationChannelSensor : public sensor::Sensor, public Component {
   uint32_t yaml_update_interval_ms_{1000};
   std::vector<FilterRuntimeNumber *> filter_runtime_numbers_{};
 
-  // NVS deferred flush state (v0.10.4): coalesce rapid HA changes
+  // NVS deferred flush state (v0.10.4/0.10.6): coalesce rapid HA changes
   bool nvs_dirty_{false};
-  uint32_t nvs_dirty_since_ms_{0};
+  uint32_t nvs_dirty_since_ms_{0};  // reset on every mark_dirty (quiet period)
   bool nvs_pending_stamp_filters_{false};
   bool nvs_pending_stamp_interval_{false};
+
+  // Lot A publish rate-limit (v0.10.6)
+  float last_published_fsr_percent_{NAN};
+  uint32_t last_fsr_publish_ms_{0};
 };
 
 

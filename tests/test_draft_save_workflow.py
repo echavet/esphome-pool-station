@@ -376,15 +376,20 @@ class SourceScanTest(unittest.TestCase):
         self.assertIn("this->live_type_", cal)
         self.assertNotIn("this->type_", cal)
 
+        # v0.10.6: live points are read inside ensure_*_cache_ (hot-path caches)
+        linear_cache = self._fn(self.engine, "void CalibrationEngine::ensure_linear_cache_() const")
+        self.assertIn("this->live_points_", linear_cache)
         linear = self._fn(self.engine, "float CalibrationEngine::calibrate_linear_(float x) const")
-        self.assertIn("this->live_points_", linear)
+        self.assertIn("ensure_linear_cache_", linear)
         poly = self.engine[
             self.engine.find("void CalibrationEngine::compute_polynomial_coefficients_") :
         ]
-        poly = poly.split("float CalibrationEngine::calibrate_piecewise_")[0]
+        poly = poly.split("void CalibrationEngine::ensure_piecewise_cache_")[0]
         self.assertIn("this->live_points_", poly)
+        piece_cache = self._fn(self.engine, "void CalibrationEngine::ensure_piecewise_cache_() const")
+        self.assertIn("this->live_points_", piece_cache)
         piece = self._fn(self.engine, "float CalibrationEngine::calibrate_piecewise_(float x) const")
-        self.assertIn("this->live_points_", piece)
+        self.assertIn("ensure_piecewise_cache_", piece)
 
     def test_is_valid_uses_live_not_working(self):
         body = self._fn(self.engine, "bool CalibrationEngine::is_valid() const")

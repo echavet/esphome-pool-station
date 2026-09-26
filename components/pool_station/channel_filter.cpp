@@ -11,6 +11,8 @@ namespace pool_station {
 void SlidingWindow::set_size(uint8_t size) {
   this->size_ = size;
   this->buffer_.resize(size, NAN);
+  this->scratch_.clear();
+  this->scratch_.reserve(size);
   this->head_ = 0;
   this->count_ = 0;
 }
@@ -38,36 +40,35 @@ float SlidingWindow::median() const {
   if (this->count_ == 0) {
     return NAN;
   }
-  
-  std::vector<float> valid;
-  valid.reserve(this->count_);
-  
+
+  // Reuse scratch_ — reserve once in set_size(); clear does not free capacity.
+  this->scratch_.clear();
   for (size_t i = 0; i < this->count_; i++) {
     float v = this->buffer_[i];
     if (!std::isnan(v)) {
-      valid.push_back(v);
+      this->scratch_.push_back(v);
     }
   }
-  
-  return filter_functions::compute_median(std::move(valid));
+
+  return filter_functions::compute_median(this->scratch_);
 }
 
 float SlidingWindow::mean() const {
   if (this->count_ == 0) {
     return NAN;
   }
-  
-  std::vector<float> valid;
-  valid.reserve(this->count_);
-  
+
+  // Allocation-free mean (no scratch needed).
+  float sum = 0.0f;
+  size_t n = 0;
   for (size_t i = 0; i < this->count_; i++) {
     float v = this->buffer_[i];
     if (!std::isnan(v)) {
-      valid.push_back(v);
+      sum += v;
+      n++;
     }
   }
-  
-  return filter_functions::compute_mean(valid);
+  return n > 0 ? sum / static_cast<float>(n) : NAN;
 }
 
 float SlidingWindow::min() const {
@@ -176,31 +177,31 @@ float JumpGuard::process(float value, bool &rejected_out) {
 
 namespace filter_functions {
 
-float compute_median(std::vector<float> values) {
+float compute_median(std::vector<float> &values) {
   if (values.empty()) {
     return NAN;
   }
-  
+
   values.erase(
-      std::remove_if(values.begin(), values.end(), 
+      std::remove_if(values.begin(), values.end(),
                      [](float v) { return std::isnan(v); }),
       values.end());
-  
+
   if (values.empty()) {
     return NAN;
   }
-  
+
   size_t n = values.size();
   size_t mid = n / 2;
-  
+
   std::nth_element(values.begin(), values.begin() + mid, values.end());
   float median = values[mid];
-  
+
   if (n % 2 == 0) {
     std::nth_element(values.begin(), values.begin() + mid - 1, values.end());
     median = (median + values[mid - 1]) / 2.0f;
   }
-  
+
   return median;
 }
 
