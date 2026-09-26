@@ -63,7 +63,7 @@ struct DiagnosticsFlags {
 /**
  * Diagnostics Window.
  * Specialized sliding window for computing diagnostic statistics.
- * Uses Welford's online algorithm for mean/variance.
+ * Uses Welford's online algorithm for mean/variance (allocation-free, v0.10.6).
  */
 class DiagnosticsWindow {
  public:

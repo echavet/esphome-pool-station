@@ -166,18 +166,18 @@ void PoolStationComponent::on_channel_sample(uint8_t channel_type, float value, 
 
 void PoolStationComponent::publish_interference_(uint32_t now_ms) {
   const InterferenceFlags flags = this->interference_.evaluate(now_ms, this->calibration_mode_active_);
-  if (this->interference_suspected_sensor_ != nullptr) {
-    this->interference_suspected_sensor_->publish_state(flags.suspected);
-  }
-  if (this->interference_coincident_jump_sensor_ != nullptr) {
-    this->interference_coincident_jump_sensor_->publish_state(flags.coincident_jump);
-  }
-  if (this->interference_shared_noise_sensor_ != nullptr) {
-    this->interference_shared_noise_sensor_->publish_state(flags.shared_noise);
-  }
-  if (this->interference_tw_coupling_sensor_ != nullptr) {
-    this->interference_tw_coupling_sensor_->publish_state(flags.tw_coupling);
-  }
+  auto publish_if_changed = [](binary_sensor::BinarySensor *sensor, bool value) {
+    if (sensor == nullptr) {
+      return;
+    }
+    if (!sensor->has_state() || sensor->state != value) {
+      sensor->publish_state(value);
+    }
+  };
+  publish_if_changed(this->interference_suspected_sensor_, flags.suspected);
+  publish_if_changed(this->interference_coincident_jump_sensor_, flags.coincident_jump);
+  publish_if_changed(this->interference_shared_noise_sensor_, flags.shared_noise);
+  publish_if_changed(this->interference_tw_coupling_sensor_, flags.tw_coupling);
   if (flags.suspected && this->interference_.should_log_now(now_ms)) {
     ESP_LOGW(TAG, "[pool_station] Interference suspected (%s)", this->interference_.active_reason());
     this->interference_.mark_logged(now_ms);
@@ -823,6 +823,35 @@ bool PoolStationChannelSensor::is_gain_mismatch() const {
   return this->gain_shadow_ != this->gain_at_last_cal_save_;
 }
 
+void PoolStationChannelSensor::publish_binary_if_changed_(binary_sensor::BinarySensor *sensor,
+                                                          bool value) {
+  if (sensor == nullptr) {
+    return;
+  }
+  if (!sensor->has_state() || sensor->state != value) {
+    sensor->publish_state(value);
+  }
+}
+
+void PoolStationChannelSensor::publish_fsr_percent_gated_(float raw, uint32_t now) {
+  if (this->fsr_percent_sensor_ == nullptr) {
+    return;
+  }
+  const float pct = this->get_fsr_percent(raw);
+  const bool first = std::isnan(this->last_published_fsr_percent_);
+  const bool due_delta =
+      first || std::isnan(pct) ||
+      std::fabs(pct - this->last_published_fsr_percent_) >= ads_runtime::FSR_PUBLISH_DELTA_PERCENT;
+  const bool due_time =
+      first || (now - this->last_fsr_publish_ms_) >= ads_runtime::FSR_PUBLISH_MAX_INTERVAL_MS;
+  if (!due_delta && !due_time) {
+    return;
+  }
+  this->fsr_percent_sensor_->publish_state(pct);
+  this->last_published_fsr_percent_ = pct;
+  this->last_fsr_publish_ms_ = now;
+}
+
 void PoolStationChannelSensor::update_saturation_(uint32_t now) {
   if (!this->ads_overlay_enabled_) {
     return;
@@ -837,12 +866,8 @@ void PoolStationChannelSensor::update_saturation_(uint32_t now) {
   } else {
     this->expire_saturation_hold_(now);
   }
-  if (this->saturated_sensor_ != nullptr) {
-    this->saturated_sensor_->publish_state(this->sat_published_);
-  }
-  if (this->fsr_percent_sensor_ != nullptr) {
-    this->fsr_percent_sensor_->publish_state(this->get_fsr_percent(raw));
-  }
+  this->publish_binary_if_changed_(this->saturated_sensor_, this->sat_published_);
+  this->publish_fsr_percent_gated_(raw, now);
 }
 
 void PoolStationChannelSensor::expire_saturation_hold_(uint32_t now) {
@@ -851,16 +876,12 @@ void PoolStationChannelSensor::expire_saturation_hold_(uint32_t now) {
   }
   if (ads_runtime::saturation_hold_expired(now, this->sat_last_on_ms_, this->sat_hold_ms_)) {
     this->sat_published_ = false;
-    if (this->saturated_sensor_ != nullptr) {
-      this->saturated_sensor_->publish_state(false);
-    }
+    this->publish_binary_if_changed_(this->saturated_sensor_, false);
   }
 }
 
 void PoolStationChannelSensor::publish_gain_mismatch_() {
-  if (this->gain_mismatch_sensor_ != nullptr) {
-    this->gain_mismatch_sensor_->publish_state(this->is_gain_mismatch());
-  }
+  this->publish_binary_if_changed_(this->gain_mismatch_sensor_, this->is_gain_mismatch());
 }
 
 void PoolStationChannelSensor::publish_ads_ui_() {
@@ -989,18 +1010,20 @@ void PoolStationChannelSensor::apply_nvs_filter_fields_(const ads_runtime::Chann
 }
 
 // ============================================================================
-// NVS Deferred Flush (v0.10.4)
-// Coalesces rapid HA parameter changes into a single NVS write after idle.
+// NVS Deferred Flush (v0.10.4 / v0.10.6)
+// Coalesces rapid HA parameter changes into a single NVS write after a quiet period.
+// v0.10.6: debounce timer resets on every mark_dirty (true idle collapse).
 // ============================================================================
 
 void PoolStationChannelSensor::mark_nvs_dirty_(bool stamp_filters, bool stamp_interval) {
   if (this->runtime_prefs_key_ == 0) {
     return;
   }
-  if (!this->nvs_dirty_) {
-    this->nvs_dirty_ = true;
-    this->nvs_dirty_since_ms_ = millis();
-  }
+  // Reset the quiet-period timer on *every* dirty mark so thrashing HA
+  // changes collapse to a single flush after NVS_FLUSH_DEBOUNCE_MS of idle
+  // (v0.10.6). v0.10.4 only stamped the first dirty → flush ~3s under thrash.
+  this->nvs_dirty_ = true;
+  this->nvs_dirty_since_ms_ = millis();
   this->nvs_pending_stamp_filters_ = this->nvs_pending_stamp_filters_ || stamp_filters;
   this->nvs_pending_stamp_interval_ = this->nvs_pending_stamp_interval_ || stamp_interval;
 }
@@ -1437,16 +1460,10 @@ void PoolStationChannelSensor::on_source_value_(float value) {
       this->diag_ptp_sensor_->publish_state(stats.ptp);
     }
     
-    // Publish diagnostic flags if configured
-    if (this->diag_noisy_flag_ != nullptr) {
-      this->diag_noisy_flag_->publish_state(flags.noisy);
-    }
-    if (this->diag_stuck_flag_ != nullptr) {
-      this->diag_stuck_flag_->publish_state(flags.stuck);
-    }
-    if (this->diag_out_of_range_flag_ != nullptr) {
-      this->diag_out_of_range_flag_->publish_state(flags.out_of_range);
-    }
+    // Publish diagnostic flags on transition only (v0.10.6 — avoid HA API flood)
+    this->publish_binary_if_changed_(this->diag_noisy_flag_, flags.noisy);
+    this->publish_binary_if_changed_(this->diag_stuck_flag_, flags.stuck);
+    this->publish_binary_if_changed_(this->diag_out_of_range_flag_, flags.out_of_range);
     
     // Structured logging on abnormal events (rate-limited)
     // Avoid spamming logs in calibration mode

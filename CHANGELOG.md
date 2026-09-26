@@ -1,3 +1,67 @@
+## [0.10.6] - 2026-09-26
+
+### Fixed — Stability pass (heap hot-path, publish storm, NVS quiet-period)
+
+Follow-up to the v0.10.x Wi-Fi/API investigation (PR #35 intent) and the
+NVS deferred-flush work in **0.10.4 / 0.10.5**.
+
+**(A) Heap hot-path** — eliminate per-sample allocations on the calibrate /
+filter / diagnostics path (~43k alloc/day at LINEAR @ 2s was reported):
+
+- Cache LINEAR slope/intercept and PIECEWISE sorted-valid points; rebuild
+  only when live points / algorithm change (same invalidation as poly coeffs)
+- `SlidingWindow::median()` reuses a scratch buffer; `mean()` is allocation-free
+- `DiagnosticsWindow::compute_stats()` is a single-pass Welford (no temp vector)
+
+**(B) Publish storm** — reduce HA API flood from ~80 entities / high sample rate:
+
+- Rate-limit `fsr_percent` publishes (Δ ≥ 0.5 % **or** every 5 s)
+- Binary sensors publish on **transition only** (saturated, gain_mismatch,
+  diag noisy/stuck/oor, interference flags). `gate_blocked` already did this.
+
+**(C) NVS idle** — reset the debounce timer on **every** `mark_nvs_dirty_()`
+so thrashing HA changes truly collapse to one flush after the quiet period
+(review: v0.10.4 only stamped the first dirty → flush ~3 s under thrash).
+
+**(D) YAML prod hardening** — notes in `examples/pool-station-minimal.yaml`:
+
+- Align ADS `update_interval` with channel intervals
+- `continuous_mode` tradeoff
+- Optional `i2c.timeout` (ADS driver timeout remains YAML/upstream)
+- Optional stock `debug` free_heap / loop_time sensors (parent YAML)
+
+**Not in this release**: OTA to production device (parent handles flash).
+Residual risk: I2C hang in the upstream ESPHome ADS1115 driver is not
+patchable here — mitigate with YAML `i2c.timeout` + aligned intervals.
+
+---
+
+## [0.10.5] - 2026-09-20
+
+### Fixed — ESPHome 2026.x compile: use `Component::on_shutdown()`
+
+v0.10.4 called `App.register_shutdown_hook()`, which does not exist in
+ESPHome 2026.x. Override `Component::on_shutdown()` instead so pending NVS
+prefs still flush on safe shutdown / OTA.
+
+---
+
+## [0.10.4] - 2026-09-20
+
+### Fixed — NVS dirty-flag + deferred flush for Lot A/B runtime prefs
+
+Primary mitigation for suspected Wi-Fi/API flapping after v0.10.x (see
+investigation / PR #35): Lot A/B `apply_*_runtime(persist=true)` no longer
+writes NVS synchronously. Changes mark dirty and flush after a 3 s idle
+window (coalesced), with best-effort flush on shutdown. Calibration
+`remember_gain_at_cal_save()` still flushes immediately and preserves
+pending filter/interval stamps.
+
+> Note: v0.10.6 resets the debounce timer on every dirty mark (true quiet
+> period). v0.10.4–0.10.5 only stamped the first dirty in a burst.
+
+---
+
 ## [0.10.3] - 2026-09-20
 
 ### Fixed — Lot A FSR% / saturation / runtime gain stuck after OTA

@@ -95,6 +95,19 @@ class NvsMarkDirtyImplementationTest(unittest.TestCase):
         self.assertIn("nvs_dirty_ = true", body)
         self.assertIn("nvs_dirty_since_ms_ = millis()", body)
 
+    def test_mark_nvs_dirty_resets_timer_every_call(self):
+        """v0.10.6: quiet-period timer must reset on every dirty mark."""
+        with open(CHANNEL_CPP, encoding="utf-8") as handle:
+            source = handle.read()
+        body = _fn(source, "void PoolStationChannelSensor::mark_nvs_dirty_")
+        # Must NOT gate the timestamp behind if (!nvs_dirty_)
+        self.assertNotIn("if (!this->nvs_dirty_)", body)
+        # Timestamp assignment must be unconditional (after prefs-key bail)
+        assign_idx = body.find("nvs_dirty_since_ms_ = millis()")
+        self.assertGreater(assign_idx, 0)
+        # The dirty flag set and timestamp should both be outside any !nvs_dirty_ guard
+        self.assertIn("this->nvs_dirty_ = true;", body)
+
     def test_mark_nvs_dirty_accumulates_stamps(self):
         with open(CHANNEL_CPP, encoding="utf-8") as handle:
             source = handle.read()
